@@ -2,9 +2,11 @@ mod commands;
 mod export;
 mod import;
 mod manifest;
+mod patch;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use patch::Severity;
 
 const CLI_VERSION: &str = concat!(
     env!("CARGO_PKG_VERSION"),
@@ -78,6 +80,30 @@ enum Commands {
         #[arg(long, default_value = "./imported")]
         output_dir: String,
     },
+
+    Patch {
+        #[command(subcommand)]
+        action: PatchCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum PatchCommands {
+    Create {
+        version: String,
+        hash: String,
+        #[arg(long, default_value = "medium")]
+        severity: String,
+        #[arg(long, default_value = "100")]
+        rollout: u8,
+    },
+    Notify {
+        patch_id: String,
+    },
+    Apply {
+        contract_id: String,
+        patch_id: String,
+    },
 }
 
 #[tokio::main]
@@ -125,6 +151,18 @@ async fn main() -> Result<()> {
         Commands::Import { archive, network, output_dir } => {
             commands::import(&cli.api_url, &archive, &network, &output_dir).await?;
         }
+        Commands::Patch { action } => match action {
+            PatchCommands::Create { version, hash, severity, rollout } => {
+                let sev = severity.parse::<Severity>()?;
+                commands::patch_create(&cli.api_url, &version, &hash, sev, rollout).await?;
+            }
+            PatchCommands::Notify { patch_id } => {
+                commands::patch_notify(&cli.api_url, &patch_id).await?;
+            }
+            PatchCommands::Apply { contract_id, patch_id } => {
+                commands::patch_apply(&cli.api_url, &contract_id, &patch_id).await?;
+            }
+        },
     }
 
     Ok(())

@@ -2,6 +2,8 @@ use anyhow::{Context, Result};
 use colored::Colorize;
 use serde_json::json;
 
+use crate::patch::{PatchManager, Severity};
+
 pub async fn search(
     api_url: &str,
     query: &str,
@@ -295,3 +297,94 @@ pub async fn import(
     Ok(())
 }
 
+fn severity_colored(sev: &Severity) -> colored::ColoredString {
+    match sev {
+        Severity::Critical => "CRITICAL".red().bold(),
+        Severity::High => "HIGH".yellow().bold(),
+        Severity::Medium => "MEDIUM".cyan(),
+        Severity::Low => "LOW".normal(),
+    }
+}
+
+pub async fn patch_create(
+    api_url: &str,
+    version: &str,
+    hash: &str,
+    severity: Severity,
+    rollout: u8,
+) -> Result<()> {
+    println!("\n{}", "Creating security patch...".bold().cyan());
+
+    let patch = PatchManager::create(api_url, version, hash, severity, rollout).await?;
+
+    println!("{}", "✓ Patch created!".green().bold());
+    println!("  {}: {}", "ID".bold(), patch.id);
+    println!("  {}: {}", "Target Version".bold(), patch.target_version);
+    println!("  {}: {}", "Severity".bold(), severity_colored(&patch.severity));
+    println!("  {}: {}", "New WASM Hash".bold(), patch.new_wasm_hash.bright_black());
+    println!("  {}: {}%\n", "Rollout".bold(), patch.rollout_percentage);
+
+    if matches!(patch.severity, Severity::Critical | Severity::High) {
+        println!(
+            "  {} {}",
+            "⚠".red(),
+            format!("{} severity — immediate action recommended", severity_colored(&patch.severity)).red()
+        );
+    }
+
+    Ok(())
+}
+
+pub async fn patch_notify(api_url: &str, patch_id: &str) -> Result<()> {
+    println!("\n{}", "Identifying vulnerable contracts...".bold().cyan());
+
+    let (patch, contracts) = PatchManager::find_vulnerable(api_url, patch_id).await?;
+
+    println!(
+        "\n{} {} patch for version {}",
+        "⚠".bold(),
+        severity_colored(&patch.severity),
+        patch.target_version.bold()
+    );
+    println!("{}", "=".repeat(80).cyan());
+
+    if contracts.is_empty() {
+        println!("{}", "No vulnerable contracts found.".green());
+        return Ok(());
+    }
+
+    for (i, c) in contracts.iter().enumerate() {
+        let cid = c["contract_id"].as_str().unwrap_or("");
+        let name = c["name"].as_str().unwrap_or("Unknown");
+        let net = c["network"].as_str().unwrap_or("");
+        println!(
+            "  {}. {} ({}) [{}]",
+            i + 1,
+            name.bold(),
+            cid.bright_black(),
+            net.bright_blue()
+        );
+    }
+
+    println!("\n{}", "=".repeat(80).cyan());
+    println!("{} vulnerable contract(s) found\n", contracts.len());
+
+    Ok(())
+}
+
+pub async fn patch_apply(
+    api_url: &str,
+    contract_id: &str,
+    patch_id: &str,
+) -> Result<()> {
+    println!("\n{}", "Applying security patch...".bold().cyan());
+
+    let audit = PatchManager::apply(api_url, contract_id, patch_id).await?;
+
+    println!("{}", "✓ Patch applied successfully!".green().bold());
+    println!("  {}: {}", "Contract".bold(), audit.contract_id);
+    println!("  {}: {}", "Patch".bold(), audit.patch_id);
+    println!("  {}: {}\n", "Applied At".bold(), audit.applied_at);
+
+    Ok(())
+}
