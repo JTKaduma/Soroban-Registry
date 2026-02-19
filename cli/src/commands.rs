@@ -214,3 +214,84 @@ pub async fn list(api_url: &str, limit: usize, network: Option<&str>) -> Result<
 
     Ok(())
 }
+
+pub async fn export(
+    api_url: &str,
+    contract_id: &str,
+    output: &str,
+    contract_dir: &str,
+) -> Result<()> {
+    println!("\n{}", "Exporting contract...".bold().cyan());
+
+    let client = reqwest::Client::new();
+    let url = format!("{}/api/contracts/{}", api_url, contract_id);
+
+    let (name, network) = match client.get(&url).send().await {
+        Ok(resp) if resp.status().is_success() => {
+            let data: serde_json::Value = resp.json().await?;
+            (
+                data["name"].as_str().unwrap_or(contract_id).to_string(),
+                data["network"].as_str().unwrap_or("unknown").to_string(),
+            )
+        }
+        _ => (contract_id.to_string(), "unknown".to_string()),
+    };
+
+    let source = std::path::Path::new(contract_dir);
+    anyhow::ensure!(source.is_dir(), "contract directory does not exist: {}", contract_dir);
+
+    crate::export::create_archive(
+        source,
+        std::path::Path::new(output),
+        contract_id,
+        &name,
+        &network,
+    )?;
+
+    println!("{}", "✓ Export complete!".green().bold());
+    println!("  {}: {}", "Output".bold(), output);
+    println!("  {}: {}", "Contract".bold(), contract_id.bright_black());
+    println!("  {}: {}\n", "Name".bold(), name);
+
+    Ok(())
+}
+
+pub async fn import(
+    api_url: &str,
+    archive: &str,
+    network: &str,
+    output_dir: &str,
+) -> Result<()> {
+    println!("\n{}", "Importing contract...".bold().cyan());
+
+    let archive_path = std::path::Path::new(archive);
+    anyhow::ensure!(archive_path.is_file(), "archive not found: {}", archive);
+
+    let dest = std::path::Path::new(output_dir);
+
+    let manifest = crate::import::extract_and_verify(archive_path, dest)?;
+
+    println!("{}", "✓ Import complete — integrity verified!".green().bold());
+    println!("  {}: {}", "Contract".bold(), manifest.contract_id.bright_black());
+    println!("  {}: {}", "Name".bold(), manifest.name);
+    println!("  {}: {}", "Network".bold(), network.bright_blue());
+    println!("  {}: {}", "SHA-256".bold(), manifest.sha256.bright_black());
+    println!("  {}: {}", "Exported At".bold(), manifest.exported_at);
+    println!("  {}: {} file(s)", "Contents".bold(), manifest.contents.len());
+    println!("  {}: {}", "Extracted To".bold(), output_dir);
+
+    if api_url != "http://localhost:3001" || network != "unknown" {
+        println!(
+            "\n  {} To register on {}, run:",
+            "→".bright_black(),
+            network.bright_blue()
+        );
+        println!(
+            "    soroban-registry publish --contract-id {} --name \"{}\" --network {} --publisher <address>\n",
+            manifest.contract_id, manifest.name, network
+        );
+    }
+
+    Ok(())
+}
+

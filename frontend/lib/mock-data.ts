@@ -1,0 +1,147 @@
+import { Contract, ContractExample, ContractVersion } from './api';
+
+export const MOCK_CONTRACTS: Contract[] = [
+  {
+    id: 'c1',
+    contract_id: 'CC56J7J77K56J7K56J7K56J7K56J7K56J7K56J7K56J7K56J',
+    wasm_hash: '709e80c88487f2481e33845a0e9695d436a5a9c9f4c3d82a5c2d1b7a2d6e3f4a', // Random hash
+    name: 'Hello World Oracle',
+    description: 'A simple Oracle contract that allows storing and retrieving a greeting value. Perfect for beginners to understand Soroban storage and invocation.',
+    publisher_id: 'pub1',
+    network: 'testnet',
+    is_verified: true,
+    category: 'oracle',
+    tags: ['oracle', 'storage', 'educational'],
+    created_at: new Date(Date.now() - 86400000 * 10).toISOString(), // 10 days ago
+    updated_at: new Date(Date.now() - 86400000 * 2).toISOString(),
+  },
+  {
+    id: 'c2',
+    contract_id: 'CA45K6K66L45L6L45L6L45L6L45L6L45L6L45L6L45L6L45L',
+    wasm_hash: 'a1b2c3d4e5f678901234567890abcdef1234567890abcdef1234567890abcdef',
+    name: 'Liquidity Pool',
+    description: 'Standard AMM liquidity pool implementation supporting token swaps and liquidity provision.',
+    publisher_id: 'pub1',
+    network: 'testnet',
+    is_verified: true,
+    category: 'defi',
+    tags: ['defi', 'amm', 'swap'],
+    created_at: new Date(Date.now() - 86400000 * 20).toISOString(),
+    updated_at: new Date(Date.now() - 86400000 * 5).toISOString(),
+  },
+  {
+    id: 'c3',
+    contract_id: 'CB34M5M55N34N5N34N5N34N5N34N5N34N5N34N5N34N5N34N',
+    wasm_hash: 'f0e1d2c3b4a59687091234567890abcdef1234567890abcdef1234567890abcdef',
+    name: 'Voting DAO',
+    description: 'Governance contract for decentralized decision making with proposal creation and weighted voting.',
+    publisher_id: 'pub2',
+    network: 'mainnet',
+    is_verified: true,
+    category: 'dao',
+    tags: ['dao', 'governance', 'voting'],
+    created_at: new Date(Date.now() - 86400000 * 30).toISOString(),
+    updated_at: new Date(Date.now() - 86400000 * 15).toISOString(),
+  }
+];
+
+export const MOCK_VERSIONS: Record<string, ContractVersion[]> = {
+  'c1': [
+    {
+      id: 'v1-1',
+      contract_id: 'c1',
+      version: '1.0.0',
+      wasm_hash: '709e80c88487f2481e33845a0e9695d436a5a9c9f4c3d82a5c2d1b7a2d6e3f4a',
+      commit_hash: 'a1b2c3d',
+      created_at: new Date(Date.now() - 86400000 * 10).toISOString(),
+    }
+  ],
+  'c2': [
+    {
+      id: 'v2-1',
+      contract_id: 'c2',
+      version: '1.0.0',
+      wasm_hash: 'a1b2c3d4e5f678901234567890abcdef1234567890abcdef1234567890abcdef',
+      created_at: new Date(Date.now() - 86400000 * 20).toISOString(),
+    }
+  ],
+  'c3': [
+    {
+      id: 'v3-1',
+      contract_id: 'c3',
+      version: '1.0.0',
+      wasm_hash: 'f0e1d2c3b4a59687091234567890abcdef1234567890abcdef1234567890abcdef',
+      created_at: new Date(Date.now() - 86400000 * 30).toISOString(),
+    }
+  ]
+};
+
+export const MOCK_EXAMPLES: Record<string, ContractExample[]> = {
+  // Linking to "Hello World Oracle" ID 'c1' AND the contract_id 'CC...'
+  // In a real app we'd likely look up by primary key (UUID), but frontend often uses the ID from the route.
+  // The route /contracts/[id] usually passes the UUID or the hash. Let's assume it passes the UUID 'c1' for our mock navigation.
+  'c1': [
+    {
+      id: 'mock-1',
+      contract_id: 'c1',
+      title: 'Initialize Contract',
+      description: 'How to initialize the contract client and invoke the hello function.',
+      category: 'basic',
+      rating_up: 15,
+      rating_down: 2,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      code_js: `import { Contract, Networks } from "@stellar/stellar-sdk";
+
+const contractId = "CC56J7J77K56J7K56J7K56J7K56J7K56J7K56J7K56J7K56J";
+const contract = new Contract(contractId);
+
+// Simulate the "hello" function
+console.log("Contract initialized:", contractId);
+console.log("Ready to invoke methods.");`,
+      code_rust: `#![no_std]
+use soroban_sdk::{contractimpl, Env, Symbol, symbol_short};
+
+pub struct HelloContract;
+
+#[contractimpl]
+impl HelloContract {
+    pub fn hello(env: Env, to: Symbol) -> Symbol {
+        symbol_short!("Hello")
+    }
+}`
+    },
+    {
+      id: 'mock-2',
+      contract_id: 'c1',
+      title: 'Reading Storage',
+      description: 'How to read the greeting value from the ledger.',
+      category: 'advanced',
+      rating_up: 8,
+      rating_down: 0,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      code_js: `// Assuming the contract has a "get_greeting" method
+const op = contract.call("get_greeting");
+console.log("built operation:", op);`,
+      code_rust: `pub fn get_greeting(env: Env) -> Symbol {
+    env.storage().instance().get(&symbol_short!("GREET")).unwrap()
+}`
+    },
+    {
+      id: 'mock-3',
+      contract_id: 'c1',
+      title: 'Cross-Contract Call',
+      description: 'Calling this contract from another contract.',
+      category: 'integration',
+      rating_up: 22,
+      rating_down: 1,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      code_rust: `pub fn call_hello(env: Env, address: Address) {
+    let client = HelloContractClient::new(&env, &address);
+    client.hello(&symbol_short!("Dev"));
+}`
+    }
+  ]
+};

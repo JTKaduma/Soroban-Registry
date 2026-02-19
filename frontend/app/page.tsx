@@ -168,11 +168,14 @@ export default function Home() {
       </section>
 
       {/* Footer */}
-      <footer className="border-t border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 mt-24">
+      <footer className="border-t border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 mt-24" aria-label="Site footer">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-          <div className="text-center text-gray-600 dark:text-gray-400">
-            <p>Built for the Stellar ecosystem with ❤️</p>
-            <p className="text-sm mt-2">Powered by Soroban Smart Contracts</p>
+          <div className="flex flex-col items-center gap-3 text-gray-600 dark:text-gray-400">
+            <div className="flex items-center gap-2">
+              <Users className="w-5 h-5 text-blue-600 dark:text-blue-400" aria-hidden="true" />
+              <span>Built for the Stellar Dev Community</span>
+            </div>
+            <p className="text-sm">Powered by Soroban Smart Contracts</p>
           </div>
         </div>
       </footer>

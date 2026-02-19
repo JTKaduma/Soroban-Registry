@@ -1,6 +1,6 @@
-mod routes;
 mod handlers;
-mod error;
+mod rate_limit;
+mod routes;
 mod state;
 
 use anyhow::Result;
@@ -12,6 +12,7 @@ use std::net::SocketAddr;
 use tower_http::cors::CorsLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
+use crate::rate_limit::RateLimitState;
 use crate::state::AppState;
 
 #[tokio::main]
@@ -29,8 +30,7 @@ async fn main() -> Result<()> {
         .init();
 
     // Database connection
-    let database_url = std::env::var("DATABASE_URL")
-        .expect("DATABASE_URL must be set");
+    let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
 
     let pool = PgPoolOptions::new()
         .max_connections(5)
@@ -46,6 +46,7 @@ async fn main() -> Result<()> {
 
     // Create app state
     let state = AppState::new(pool);
+    let rate_limit_state = RateLimitState::from_env();
 
     let cors = CorsLayer::new()
         .allow_origin([
@@ -62,6 +63,11 @@ async fn main() -> Result<()> {
         .merge(routes::health_routes())
         .fallback(handlers::route_not_found)
         .layer(middleware::from_fn(request_logger))
+        .layer(middleware::from_fn_with_state(
+            rate_limit_state,
+            rate_limit::rate_limit_middleware,
+        ))
+        .layer(CorsLayer::permissive())
         .layer(cors)
         .with_state(state);
 
@@ -70,7 +76,11 @@ async fn main() -> Result<()> {
     tracing::info!("API server listening on {}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app).await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
 
     Ok(())
 }

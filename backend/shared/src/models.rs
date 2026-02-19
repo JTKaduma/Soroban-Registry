@@ -118,28 +118,34 @@ pub struct ContractSearchParams {
     pub category: Option<String>,
     pub tags: Option<Vec<String>>,
     pub page: Option<i64>,
-    pub page_size: Option<i64>,
+    #[serde(alias = "page_size")]
+    pub limit: Option<i64>,
 }
 
 /// Paginated response
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PaginatedResponse<T> {
+    #[serde(rename = "contracts")]
     pub items: Vec<T>,
     pub total: i64,
     pub page: i64,
-    pub page_size: i64,
+    #[serde(rename = "pages")]
     pub total_pages: i64,
 }
 
 impl<T> PaginatedResponse<T> {
-    pub fn new(items: Vec<T>, total: i64, page: i64, page_size: i64) -> Self {
-        let total_pages = (total as f64 / page_size as f64).ceil() as i64;
+    pub fn new(items: Vec<T>, total: i64, page: i64, limit: i64) -> Self {
+        let total_pages = if limit > 0 {
+            (total as f64 / limit as f64).ceil() as i64
+        } else {
+            0
+        };
         Self {
             items,
             total,
             page,
-            page_size,
             total_pages,
         }
     }
 }
+

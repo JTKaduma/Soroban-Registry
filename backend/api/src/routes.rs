@@ -11,7 +11,10 @@ pub fn contract_routes() -> Router<AppState> {
         .route("/api/contracts", get(handlers::list_contracts))
         .route("/api/contracts", post(handlers::publish_contract))
         .route("/api/contracts/:id", get(handlers::get_contract))
-        .route("/api/contracts/:id/versions", get(handlers::get_contract_versions))
+        .route(
+            "/api/contracts/:id/versions",
+            get(handlers::get_contract_versions),
+        )
         .route("/api/contracts/verify", post(handlers::verify_contract))
 }
 
@@ -20,7 +23,10 @@ pub fn publisher_routes() -> Router<AppState> {
     Router::new()
         .route("/api/publishers", post(handlers::create_publisher))
         .route("/api/publishers/:id", get(handlers::get_publisher))
-        .route("/api/publishers/:id/contracts", get(handlers::get_publisher_contracts))
+        .route(
+            "/api/publishers/:id/contracts",
+            get(handlers::get_publisher_contracts),
+        )
 }
 
 /// Health check routes
