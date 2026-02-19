@@ -1,5 +1,6 @@
 mod routes;
 mod handlers;
+mod error;
 mod state;
 
 use anyhow::Result;
@@ -50,6 +51,7 @@ async fn main() -> Result<()> {
         .merge(routes::contract_routes())
         .merge(routes::publisher_routes())
         .merge(routes::health_routes())
+        .fallback(handlers::route_not_found)
         .layer(CorsLayer::permissive())
         .with_state(state);
 
