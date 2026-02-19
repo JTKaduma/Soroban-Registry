@@ -8,12 +8,14 @@ use axum::{
     Json,
 };
 use shared::{
-    Contract, ContractSearchParams, ContractVersion, PaginatedResponse, PublishRequest, Publisher,
-    VerifyRequest,
+    AnalyticsEventType, Contract, ContractAnalyticsResponse, ContractSearchParams, ContractVersion,
+    DeploymentStats, InteractorStats, PaginatedResponse, PublishRequest, Publisher, TimelineEntry,
+    TopUser, VerifyRequest,
 };
 use uuid::Uuid;
 
 use crate::{
+    analytics,
     error::{ApiError, ApiResult},
     state::AppState,
 };
@@ -24,19 +26,23 @@ fn db_internal_error(operation: &str, err: sqlx::Error) -> ApiError {
 }
 
 fn map_json_rejection(err: JsonRejection) -> ApiError {
-    ApiError::bad_request("InvalidRequest", format!("Invalid JSON payload: {}", err.body_text()))
+    ApiError::bad_request(
+        "InvalidRequest",
+        format!("Invalid JSON payload: {}", err.body_text()),
+    )
 }
 
 fn map_query_rejection(err: QueryRejection) -> ApiError {
-    ApiError::bad_request("InvalidQuery", format!("Invalid query parameters: {}", err.body_text()))
+    ApiError::bad_request(
+        "InvalidQuery",
+        format!("Invalid query parameters: {}", err.body_text()),
+    )
 }
 
 /// Health check — probes DB connectivity and reports uptime.
 /// Returns 200 when everything is reachable, 503 when the database
 /// connection pool cannot satisfy a trivial query.
-pub async fn health_check(
-    State(state): State<AppState>,
-) -> (StatusCode, Json<serde_json::Value>) {
+pub async fn health_check(State(state): State<AppState>) -> (StatusCode, Json<serde_json::Value>) {
     let uptime = state.started_at.elapsed().as_secs();
     let now = chrono::Utc::now().to_rfc3339();
 
@@ -60,7 +66,10 @@ pub async fn health_check(
             })),
         )
     } else {
-        tracing::warn!(uptime_secs = uptime, "health check degraded — db unreachable");
+        tracing::warn!(
+            uptime_secs = uptime,
+            "health check degraded — db unreachable"
+        );
 
         (
             StatusCode::SERVICE_UNAVAILABLE,
@@ -75,9 +84,7 @@ pub async fn health_check(
 }
 
 /// Get registry statistics
-pub async fn get_stats(
-    State(state): State<AppState>,
-) -> ApiResult<Json<serde_json::Value>> {
+pub async fn get_stats(State(state): State<AppState>) -> ApiResult<Json<serde_json::Value>> {
     let total_contracts: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM contracts")
         .fetch_one(&state.db)
         .await
@@ -87,7 +94,7 @@ pub async fn get_stats(
         sqlx::query_scalar("SELECT COUNT(*) FROM contracts WHERE is_verified = true")
             .fetch_one(&state.db)
             .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            .map_err(|err| db_internal_error("count verified contracts", err))?;
 
     let total_publishers: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM publishers")
         .fetch_one(&state.db)
@@ -150,21 +157,15 @@ pub async fn list_contracts(
 
     query.push_str(&format!(
         " ORDER BY created_at DESC LIMIT {} OFFSET {}",
-        page_size, offset
+        limit, offset
     ));
 
-    let contracts: Vec<Contract> = match sqlx::query_as(&query)
-        .fetch_all(&state.db)
-        .await
-    {
+    let contracts: Vec<Contract> = match sqlx::query_as(&query).fetch_all(&state.db).await {
         Ok(rows) => rows,
         Err(err) => return db_internal_error("list contracts", err).into_response(),
     };
 
-    let total: i64 = match sqlx::query_scalar(&count_query)
-        .fetch_one(&state.db)
-        .await
-    {
+    let total: i64 = match sqlx::query_scalar(&count_query).fetch_one(&state.db).await {
         Ok(n) => n,
         Err(err) => return db_internal_error("count filtered contracts", err).into_response(),
     };
@@ -192,16 +193,20 @@ pub async fn list_contracts(
 
     let mut response = (StatusCode::OK, Json(paginated)).into_response();
 
-    Ok(Json(PaginatedResponse::new(
-        contracts, total, page, page_size,
-    )))
+    if !links.is_empty() {
+        if let Ok(value) = axum::http::HeaderValue::from_str(&links.join(", ")) {
+            response.headers_mut().insert("link", value);
+        }
+    }
+
+    response
 }
 
 /// Get a specific contract by ID
 pub async fn get_contract(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
-) -> Result<Json<Contract>, StatusCode> {
+) -> ApiResult<Json<Contract>> {
     let contract: Contract = sqlx::query_as("SELECT * FROM contracts WHERE id = $1")
         .bind(id)
         .fetch_one(&state.db)
@@ -235,7 +240,7 @@ pub async fn get_contract_versions(
     .bind(id)
     .fetch_all(&state.db)
     .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    .map_err(|err| db_internal_error("list versions", err))?;
 
     Ok(Json(versions))
 }
@@ -256,7 +261,7 @@ pub async fn publish_contract(
     .bind(&req.publisher_address)
     .fetch_one(&state.db)
     .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    .map_err(|err| db_internal_error("upsert publisher", err))?;
 
     // TODO: Fetch WASM hash from Stellar network
     let wasm_hash = "placeholder_hash".to_string();
@@ -279,17 +284,58 @@ pub async fn publish_contract(
     .await
     .map_err(|err| db_internal_error("create contract", err))?;
 
+    // Fire-and-forget analytics event
+    let pool = state.db.clone();
+    let cid = contract.id;
+    let addr = req.publisher_address.clone();
+    let net = contract.network.clone();
+    tokio::spawn(async move {
+        if let Err(err) = analytics::record_event(
+            &pool,
+            AnalyticsEventType::ContractPublished,
+            cid,
+            Some(&addr),
+            Some(&net),
+            None,
+        )
+        .await
+        {
+            tracing::warn!(error = ?err, "failed to record contract_published event");
+        }
+    });
+
     Ok(Json(contract))
 }
 
 /// Verify a contract
 pub async fn verify_contract(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     payload: Result<Json<VerifyRequest>, JsonRejection>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let Json(_req) = payload.map_err(map_json_rejection)?;
+    let Json(req) = payload.map_err(map_json_rejection)?;
 
-    // TODO: Implement verification logic
+    // TODO: Implement full verification logic
+
+    // Fire-and-forget analytics event
+    // We parse the contract_id string as UUID for the event; if it fails we skip.
+    if let Ok(cid) = Uuid::parse_str(&req.contract_id) {
+        let pool = state.db.clone();
+        tokio::spawn(async move {
+            if let Err(err) = analytics::record_event(
+                &pool,
+                AnalyticsEventType::ContractVerified,
+                cid,
+                None,
+                None,
+                Some(serde_json::json!({ "compiler_version": req.compiler_version })),
+            )
+            .await
+            {
+                tracing::warn!(error = ?err, "failed to record contract_verified event");
+            }
+        });
+    }
+
     Ok(Json(serde_json::json!({
         "status": "pending",
         "message": "Verification started"
@@ -315,7 +361,7 @@ pub async fn create_publisher(
     .bind(&publisher.website)
     .fetch_one(&state.db)
     .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    .map_err(|err| db_internal_error("create publisher", err))?;
 
     Ok(Json(created))
 }
@@ -324,7 +370,7 @@ pub async fn create_publisher(
 pub async fn get_publisher(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
-) -> Result<Json<Publisher>, StatusCode> {
+) -> ApiResult<Json<Publisher>> {
     let publisher: Publisher = sqlx::query_as("SELECT * FROM publishers WHERE id = $1")
         .bind(id)
         .fetch_one(&state.db)
@@ -344,15 +390,144 @@ pub async fn get_publisher(
 pub async fn get_publisher_contracts(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
-) -> Result<Json<Vec<Contract>>, StatusCode> {
+) -> ApiResult<Json<Vec<Contract>>> {
     let contracts: Vec<Contract> =
         sqlx::query_as("SELECT * FROM contracts WHERE publisher_id = $1 ORDER BY created_at DESC")
             .bind(id)
             .fetch_all(&state.db)
             .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            .map_err(|err| db_internal_error("list publisher contracts", err))?;
 
     Ok(Json(contracts))
+}
+
+/// Get analytics for a specific contract
+pub async fn get_contract_analytics(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<ContractAnalyticsResponse>> {
+    // Verify the contract exists
+    let _contract: Contract = sqlx::query_as("SELECT * FROM contracts WHERE id = $1")
+        .bind(id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|err| match err {
+            sqlx::Error::RowNotFound => ApiError::not_found(
+                "ContractNotFound",
+                format!("No contract found with ID: {}", id),
+            ),
+            _ => db_internal_error("get contract for analytics", err),
+        })?;
+
+    let thirty_days_ago = chrono::Utc::now() - chrono::Duration::days(30);
+
+    // ── Deployment stats ────────────────────────────────────────────────
+    let deploy_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM analytics_events \
+         WHERE contract_id = $1 AND event_type = 'contract_deployed'",
+    )
+    .bind(id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| db_internal_error("deployment count", e))?;
+
+    let unique_deployers: i64 = sqlx::query_scalar(
+        "SELECT COUNT(DISTINCT user_address) FROM analytics_events \
+         WHERE contract_id = $1 AND event_type = 'contract_deployed' AND user_address IS NOT NULL",
+    )
+    .bind(id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| db_internal_error("unique deployers", e))?;
+
+    let by_network: serde_json::Value = sqlx::query_scalar(
+        r#"
+        SELECT COALESCE(
+            jsonb_object_agg(COALESCE(network::text, 'unknown'), cnt),
+            '{}'::jsonb
+        )
+        FROM (
+            SELECT network, COUNT(*) AS cnt
+            FROM analytics_events
+            WHERE contract_id = $1 AND event_type = 'contract_deployed'
+            GROUP BY network
+        ) sub
+        "#,
+    )
+    .bind(id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| db_internal_error("network breakdown", e))?;
+
+    // ── Interactor stats ────────────────────────────────────────────────
+    let unique_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(DISTINCT user_address) FROM analytics_events \
+         WHERE contract_id = $1 AND user_address IS NOT NULL",
+    )
+    .bind(id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| db_internal_error("unique interactors", e))?;
+
+    let top_user_rows: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT user_address, COUNT(*) AS cnt FROM analytics_events \
+         WHERE contract_id = $1 AND user_address IS NOT NULL \
+         GROUP BY user_address ORDER BY cnt DESC LIMIT 10",
+    )
+    .bind(id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| db_internal_error("top users", e))?;
+
+    let top_users: Vec<TopUser> = top_user_rows
+        .into_iter()
+        .map(|(address, count)| TopUser { address, count })
+        .collect();
+
+    // ── Timeline (last 30 days) ─────────────────────────────────────────
+    let timeline_rows: Vec<(chrono::NaiveDate, i64)> = sqlx::query_as(
+        r#"
+        SELECT d::date AS date, COALESCE(e.cnt, 0) AS count
+        FROM generate_series(
+            ($1::timestamptz)::date,
+            CURRENT_DATE,
+            '1 day'::interval
+        ) d
+        LEFT JOIN (
+            SELECT DATE(created_at) AS event_date, COUNT(*) AS cnt
+            FROM analytics_events
+            WHERE contract_id = $2
+              AND created_at >= $1
+            GROUP BY DATE(created_at)
+        ) e ON d::date = e.event_date
+        ORDER BY d::date
+        "#,
+    )
+    .bind(thirty_days_ago)
+    .bind(id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| db_internal_error("timeline", e))?;
+
+    let timeline: Vec<TimelineEntry> = timeline_rows
+        .into_iter()
+        .map(|(date, count)| TimelineEntry { date, count })
+        .collect();
+
+    // ── Build response ──────────────────────────────────────────────────
+    Ok(Json(ContractAnalyticsResponse {
+        contract_id: id,
+        deployments: DeploymentStats {
+            count: deploy_count,
+            unique_users: unique_deployers,
+            by_network,
+        },
+        interactors: InteractorStats {
+            unique_count,
+            top_users,
+        },
+        timeline,
+    }))
 }
 
 /// Fallback endpoint for unknown routes

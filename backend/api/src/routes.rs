@@ -15,6 +15,10 @@ pub fn contract_routes() -> Router<AppState> {
             "/api/contracts/:id/versions",
             get(handlers::get_contract_versions),
         )
+        .route(
+            "/api/contracts/:id/analytics",
+            get(handlers::get_contract_analytics),
+        )
         .route("/api/contracts/verify", post(handlers::verify_contract))
 }
 

@@ -1,3 +1,6 @@
+mod aggregation;
+mod analytics;
+mod error;
 mod handlers;
 mod rate_limit;
 mod routes;
@@ -5,7 +8,7 @@ mod state;
 
 use anyhow::Result;
 use axum::http::{header, HeaderValue, Method};
-use axum::{Router, middleware};
+use axum::{middleware, Router};
 use dotenv::dotenv;
 use sqlx::postgres::PgPoolOptions;
 use std::net::SocketAddr;
@@ -43,6 +46,9 @@ async fn main() -> Result<()> {
         .await?;
 
     tracing::info!("Database connected and migrations applied");
+
+    // Spawn the hourly analytics aggregation background task
+    aggregation::spawn_aggregation_task(pool.clone());
 
     // Create app state
     let state = AppState::new(pool);

@@ -7,8 +7,8 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct Contract {
     pub id: Uuid,
-    pub contract_id: String,        // Stellar contract ID (C...)
-    pub wasm_hash: String,           // Hash of the WASM bytecode
+    pub contract_id: String, // Stellar contract ID (C...)
+    pub wasm_hash: String,   // Hash of the WASM bytecode
     pub name: String,
     pub description: Option<String>,
     pub publisher_id: Uuid,
@@ -149,3 +149,100 @@ impl<T> PaginatedResponse<T> {
     }
 }
 
+// ────────────────────────────────────────────────────────────────────────────
+// Analytics models
+// ────────────────────────────────────────────────────────────────────────────
+
+/// Types of analytics events tracked by the system
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type, PartialEq)]
+#[sqlx(type_name = "analytics_event_type", rename_all = "snake_case")]
+pub enum AnalyticsEventType {
+    ContractPublished,
+    ContractVerified,
+    ContractDeployed,
+    VersionCreated,
+}
+
+impl std::fmt::Display for AnalyticsEventType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ContractPublished => write!(f, "contract_published"),
+            Self::ContractVerified => write!(f, "contract_verified"),
+            Self::ContractDeployed => write!(f, "contract_deployed"),
+            Self::VersionCreated => write!(f, "version_created"),
+        }
+    }
+}
+
+/// A raw analytics event recorded when a contract lifecycle action occurs
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct AnalyticsEvent {
+    pub id: Uuid,
+    pub event_type: AnalyticsEventType,
+    pub contract_id: Uuid,
+    pub user_address: Option<String>,
+    pub network: Option<Network>,
+    pub metadata: Option<serde_json::Value>,
+    pub created_at: DateTime<Utc>,
+}
+
+/// Pre-computed daily aggregate for a single contract
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct DailyAggregate {
+    pub id: Uuid,
+    pub contract_id: Uuid,
+    pub date: chrono::NaiveDate,
+    pub deployment_count: i32,
+    pub unique_deployers: i32,
+    pub verification_count: i32,
+    pub publish_count: i32,
+    pub version_count: i32,
+    pub total_events: i32,
+    pub unique_users: i32,
+    pub network_breakdown: serde_json::Value,
+    pub top_users: serde_json::Value,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Analytics API response DTOs
+// ────────────────────────────────────────────────────────────────────────────
+
+/// Top-level response for GET /api/contracts/:id/analytics
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContractAnalyticsResponse {
+    pub contract_id: Uuid,
+    pub deployments: DeploymentStats,
+    pub interactors: InteractorStats,
+    pub timeline: Vec<TimelineEntry>,
+}
+
+/// Deployment statistics
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeploymentStats {
+    pub count: i64,
+    pub unique_users: i64,
+    pub by_network: serde_json::Value,
+}
+
+/// Interactor / unique-user statistics
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InteractorStats {
+    pub unique_count: i64,
+    pub top_users: Vec<TopUser>,
+}
+
+/// A user ranked by interaction count
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TopUser {
+    pub address: String,
+    pub count: i64,
+}
+
+/// One data-point in the 30-day timeline
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TimelineEntry {
+    pub date: chrono::NaiveDate,
+    pub count: i64,
+}
