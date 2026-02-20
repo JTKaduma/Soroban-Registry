@@ -432,7 +432,7 @@ async fn build_audit_response(
                 title: item.title.clone(),
                 description: item.description.clone(),
                 severity: format!("{:?}", item.severity),
-                detection_type: detection_type.to_string(),
+                detection_type,
                 auto_patterns,
                 remediation: item.remediation.clone(),
                 references: item.references.clone(),

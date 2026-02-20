@@ -10,14 +10,15 @@ use axum::{
 use chrono::Utc;
 use serde::Deserialize;
 use shared::{
-    CreatePolicyRequest, CreateProposalRequest, MultisigPolicy, DeployProposal,
-    ProposalSignature, ProposalStatus, ProposalWithSignatures, SignProposalRequest,
+    CreatePolicyRequest, CreateProposalRequest, DeployProposal, MultisigPolicy, ProposalSignature,
+    ProposalStatus, ProposalWithSignatures, SignProposalRequest,
 };
 use uuid::Uuid;
 
 use crate::{
     error::{ApiError, ApiResult},
     handlers::db_internal_error,
+    resource_tracking::ResourceUsage,
     state::AppState,
 };
 
@@ -49,13 +50,11 @@ async fn fetch_proposal(state: &AppState, id: Uuid) -> ApiResult<DeployProposal>
 
 /// Transition an expired proposal to `expired` status in the DB.
 async fn expire_proposal(state: &AppState, id: Uuid) -> ApiResult<()> {
-    sqlx::query(
-        "UPDATE deploy_proposals SET status = 'expired', updated_at = NOW() WHERE id = $1",
-    )
-    .bind(id)
-    .execute(&state.db)
-    .await
-    .map_err(|err| db_internal_error("expire proposal", err))?;
+    sqlx::query("UPDATE deploy_proposals SET status = 'expired', updated_at = NOW() WHERE id = $1")
+        .bind(id)
+        .execute(&state.db)
+        .await
+        .map_err(|err| db_internal_error("expire proposal", err))?;
     Ok(())
 }
 
@@ -135,31 +134,38 @@ pub async fn create_proposal(
 
     // Validate required fields
     if req.contract_id.is_empty() {
-        return Err(ApiError::bad_request("MissingContractId", "contract_id is required"));
+        return Err(ApiError::bad_request(
+            "MissingContractId",
+            "contract_id is required",
+        ));
     }
     if req.wasm_hash.is_empty() {
-        return Err(ApiError::bad_request("MissingWasmHash", "wasm_hash is required"));
+        return Err(ApiError::bad_request(
+            "MissingWasmHash",
+            "wasm_hash is required",
+        ));
     }
     if req.proposer.is_empty() {
-        return Err(ApiError::bad_request("MissingProposer", "proposer is required"));
+        return Err(ApiError::bad_request(
+            "MissingProposer",
+            "proposer is required",
+        ));
     }
 
     // Look up the policy to compute expires_at
-    let policy: MultisigPolicy =
-        sqlx::query_as("SELECT * FROM multisig_policies WHERE id = $1")
-            .bind(req.policy_id)
-            .fetch_one(&state.db)
-            .await
-            .map_err(|err| match err {
-                sqlx::Error::RowNotFound => ApiError::not_found(
-                    "PolicyNotFound",
-                    format!("No policy found with ID: {}", req.policy_id),
-                ),
-                _ => db_internal_error("fetch policy for proposal", err),
-            })?;
+    let policy: MultisigPolicy = sqlx::query_as("SELECT * FROM multisig_policies WHERE id = $1")
+        .bind(req.policy_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|err| match err {
+            sqlx::Error::RowNotFound => ApiError::not_found(
+                "PolicyNotFound",
+                format!("No policy found with ID: {}", req.policy_id),
+            ),
+            _ => db_internal_error("fetch policy for proposal", err),
+        })?;
 
-    let expires_at = Utc::now()
-        + chrono::Duration::seconds(policy.expiry_seconds as i64);
+    let expires_at = Utc::now() + chrono::Duration::seconds(policy.expiry_seconds as i64);
 
     let proposal: DeployProposal = sqlx::query_as(
         "INSERT INTO deploy_proposals
@@ -234,12 +240,11 @@ pub async fn sign_proposal(
     }
 
     // Fetch the policy to validate the signer
-    let policy: MultisigPolicy =
-        sqlx::query_as("SELECT * FROM multisig_policies WHERE id = $1")
-            .bind(proposal.policy_id)
-            .fetch_one(&state.db)
-            .await
-            .map_err(|err| db_internal_error("fetch policy for signing", err))?;
+    let policy: MultisigPolicy = sqlx::query_as("SELECT * FROM multisig_policies WHERE id = $1")
+        .bind(proposal.policy_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|err| db_internal_error("fetch policy for signing", err))?;
 
     if !policy.signer_addresses.contains(&req.signer_address) {
         return Err(ApiError::bad_request(
@@ -264,7 +269,8 @@ pub async fn sign_proposal(
     .await
     .map_err(|err| match err {
         sqlx::Error::Database(ref db_err)
-            if db_err.constraint() == Some("proposal_signatures_proposal_id_signer_address_key") =>
+            if db_err.constraint()
+                == Some("proposal_signatures_proposal_id_signer_address_key") =>
         {
             ApiError::bad_request(
                 "AlreadySigned",
@@ -366,6 +372,20 @@ pub async fn execute_proposal(
         wasm_hash    = %proposal.wasm_hash,
         "deployment proposal executed"
     );
+    let wasm_len = proposal.wasm_hash.len() as u64;
+    let cpu = 2_400_000 + wasm_len.saturating_mul(140);
+    let mem = 4_000_000 + wasm_len.saturating_mul(96);
+    let contract_id = proposal.contract_id.to_string();
+    let mut mgr = state.resource_mgr.write().unwrap();
+    let _ = mgr.record_usage(
+        &contract_id,
+        ResourceUsage {
+            cpu_instructions: cpu,
+            mem_bytes: mem,
+            storage_bytes: wasm_len,
+            timestamp: Utc::now(),
+        },
+    );
 
     Ok(Json(serde_json::json!({
         "success": true,
@@ -388,12 +408,11 @@ pub async fn get_proposal(
 ) -> ApiResult<Json<ProposalWithSignatures>> {
     let proposal = fetch_proposal(&state, proposal_id).await?;
 
-    let policy: MultisigPolicy =
-        sqlx::query_as("SELECT * FROM multisig_policies WHERE id = $1")
-            .bind(proposal.policy_id)
-            .fetch_one(&state.db)
-            .await
-            .map_err(|err| db_internal_error("fetch policy for proposal info", err))?;
+    let policy: MultisigPolicy = sqlx::query_as("SELECT * FROM multisig_policies WHERE id = $1")
+        .bind(proposal.policy_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|err| db_internal_error("fetch policy for proposal info", err))?;
 
     let signatures: Vec<ProposalSignature> = sqlx::query_as(
         "SELECT * FROM proposal_signatures WHERE proposal_id = $1 ORDER BY signed_at ASC",
