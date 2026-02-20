@@ -4,6 +4,7 @@ members = [
     "indexer",
     "verifier",
     "shared",
+    "seeder",
 ]
 resolver = "2"
 

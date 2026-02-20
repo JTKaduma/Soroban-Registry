@@ -12,3 +12,4 @@ sqlx = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 anyhow = { workspace = true }
+rust_decimal = { version = "1.33", features = ["serde-with-str"] }
