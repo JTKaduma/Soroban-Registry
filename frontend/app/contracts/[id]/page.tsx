@@ -12,9 +12,12 @@ import {
   Globe,
   Github,
   Tag,
+  GitCompare,
 } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import FormalVerificationPanel from "@/components/FormalVerificationPanel";
+
 
 function ContractDetailsContent() {
   const params = useParams();
@@ -163,6 +166,21 @@ function ContractDetailsContent() {
               </div>
             </dl>
           </div>
+
+          {/* Compatibility Matrix link */}
+          <Link
+            href={`/contracts/${contract.id}/compatibility`}
+            className="flex items-center gap-3 w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 hover:bg-blue-50 dark:hover:bg-blue-900/20 hover:border-blue-300 dark:hover:border-blue-700 text-gray-700 dark:text-gray-300 hover:text-blue-700 dark:hover:text-blue-300 transition-all group"
+          >
+            <GitCompare className="w-5 h-5 text-gray-400 group-hover:text-blue-500 transition-colors" />
+            <div>
+              <div className="text-sm font-medium">Compatibility Matrix</div>
+              <div className="text-xs text-gray-400 dark:text-gray-500">View version compatibility</div>
+            </div>
+          </Link>
+
+          {/* Formal Verification Panel */}
+          <FormalVerificationPanel contractId={contract.id} />
         </div>
       </div>
     </div>

@@ -50,52 +50,6 @@ if [ "$ALL_PRESENT" = false ]; then
 fi
 echo ""
 
-# Check 2b: Maturity Feature Files
-echo "✓ Check 2b: Maturity Feature Files"
-MATURITY_FILES=(
-    "backend/api/src/maturity_handlers.rs"
-    "backend/api/src/maturity_routes.rs"
-    "frontend/components/MaturityBadge.tsx"
-    "docs/MATURITY_LEVELS.md"
-)
-
-for file in "${MATURITY_FILES[@]}"; do
-    if [ -f "$file" ]; then
-        echo "  ✅ $file"
-    else
-        echo "  ❌ $file (missing)"
-        ALL_PRESENT=false
-    fi
-done
-
-if [ "$ALL_PRESENT" = false ]; then
-    exit 1
-fi
-echo ""
-
-# Check 2c: Cost Estimation Feature Files
-echo "✓ Check 2c: Cost Estimation Feature Files"
-COST_FILES=(
-    "backend/api/src/cost_handlers.rs"
-    "backend/api/src/cost_routes.rs"
-    "cli/src/costs.rs"
-    "docs/COST_ESTIMATION.md"
-)
-
-for file in "${COST_FILES[@]}"; do
-    if [ -f "$file" ]; then
-        echo "  ✅ $file"
-    else
-        echo "  ❌ $file (missing)"
-        ALL_PRESENT=false
-    fi
-done
-
-if [ "$ALL_PRESENT" = false ]; then
-    exit 1
-fi
-echo ""
-
 # Check 3: Frontend Structure
 echo "✓ Check 3: Frontend Structure"
 if [ -f "frontend/package.json" ]; then

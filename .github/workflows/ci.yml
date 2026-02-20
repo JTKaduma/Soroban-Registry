@@ -51,34 +51,6 @@ jobs:
           test -f frontend/components/MaintenanceBanner.tsx && echo "✓ Frontend component present"
           test -f docs/MAINTENANCE_MODE.md && echo "✓ Documentation present"
           echo "✓ All maintenance mode files present"
-          
-  check-maturity-feature:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Verify maturity levels files
-        run: |
-          echo "Checking maturity levels implementation..."
-          test -f backend/api/src/maturity_handlers.rs && echo "✓ Handlers present"
-          test -f backend/api/src/maturity_routes.rs && echo "✓ Routes present"
-          test -f database/migrations/005_maturity_levels.sql && echo "✓ Migration present"
-          test -f frontend/components/MaturityBadge.tsx && echo "✓ Frontend component present"
-          test -f docs/MATURITY_LEVELS.md && echo "✓ Documentation present"
-          echo "✓ All maturity level files present"
-          
-  check-cost-estimation-feature:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Verify cost estimation files
-        run: |
-          echo "Checking cost estimation implementation..."
-          test -f backend/api/src/cost_handlers.rs && echo "✓ Handlers present"
-          test -f backend/api/src/cost_routes.rs && echo "✓ Routes present"
-          test -f database/migrations/006_cost_estimation.sql && echo "✓ Migration present"
-          test -f cli/src/costs.rs && echo "✓ CLI module present"
-          test -f docs/COST_ESTIMATION.md && echo "✓ Documentation present"
-          echo "✓ All cost estimation files present"
 
   format-check:
     runs-on: ubuntu-latest

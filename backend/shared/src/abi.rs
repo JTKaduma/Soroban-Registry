@@ -1,6 +1,6 @@
-use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::process::Command;
+use anyhow::{Context, Result};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ContractSpec {
@@ -61,10 +61,7 @@ pub fn generate_markdown(specs: &[ContractSpec], name: &str) -> String {
             md.push_str("- None\n");
         } else {
             for input in &spec.inputs {
-                md.push_str(&format!(
-                    "- `{}`: `{}`\n",
-                    input.name, input.value.type_name
-                ));
+                md.push_str(&format!("- `{}`: `{}`\n", input.name, input.value.type_name));
             }
         }
 
@@ -72,16 +69,14 @@ pub fn generate_markdown(specs: &[ContractSpec], name: &str) -> String {
         if spec.outputs.is_empty() {
             md.push_str("`void`");
         } else {
-            let types: Vec<&str> = spec.outputs.iter().map(|o| o.type_name.as_str()).collect();
-            md.push_str(&format!("`{}`", types.join(", ")));
+            let types: Vec<_> = spec.outputs.iter().map(|o| &o.type_name).collect();
+  md.push_str(&format!("`{}`", types.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")));
         }
 
         md.push_str("\n\n**Example:**\n```rust\n");
         md.push_str(&format!("contract.{}(", spec.name));
         for (i, input) in spec.inputs.iter().enumerate() {
-            if i > 0 {
-                md.push_str(", ");
-            }
+            if i > 0 { md.push_str(", "); }
             md.push_str(&input.name);
         }
         md.push_str(");\n```\n\n---\n\n");

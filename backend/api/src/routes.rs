@@ -3,7 +3,7 @@ use axum::{
     Router,
 };
 
-use crate::{handlers, metrics_handler, state::AppState};
+use crate::{compatibility_handlers, handlers, metrics_handler, state::AppState};
 
 pub fn observability_routes() -> Router<AppState> {
     Router::new().route("/metrics", get(metrics_handler::metrics_endpoint))
@@ -60,6 +60,15 @@ pub fn contract_routes() -> Router<AppState> {
         .route(
             "/api/contracts/:id/performance",
             get(handlers::get_contract_performance),
+        )
+        .route(
+            "/api/contracts/:id/compatibility",
+            get(compatibility_handlers::get_contract_compatibility)
+                .post(compatibility_handlers::add_contract_compatibility),
+        )
+        .route(
+            "/api/contracts/:id/compatibility/export",
+            get(compatibility_handlers::export_contract_compatibility),
         )
 }
 

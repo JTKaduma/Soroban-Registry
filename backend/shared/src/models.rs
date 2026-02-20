@@ -25,20 +25,6 @@ pub struct Contract {
     pub updated_at: DateTime<Utc>,
     #[serde(default)]
     pub is_maintenance: bool,
-    #[serde(default)]
-    pub maturity: MaturityLevel,
-}
-
-/// Contract maturity level
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type, Default)]
-#[sqlx(type_name = "maturity_level", rename_all = "lowercase")]
-pub enum MaturityLevel {
-    #[default]
-    Alpha,
-    Beta,
-    Stable,
-    Mature,
-    Legacy,
 }
 
 /// Network where the contract is deployed
@@ -49,6 +35,16 @@ pub enum Network {
     Mainnet,
     Testnet,
     Futurenet,
+}
+
+impl std::fmt::Display for Network {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Network::Mainnet => write!(f, "mainnet"),
+            Network::Testnet => write!(f, "testnet"),
+            Network::Futurenet => write!(f, "futurenet"),
+        }
+    }
 }
 
 /// Contract version information
@@ -1057,9 +1053,78 @@ pub struct CheckResidencyRequest {
     pub requested_by:     Option<String>,
 }
 
+impl std::fmt::Display for DeploymentEnvironment {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DeploymentEnvironment::Blue => write!(f, "blue"),
+            DeploymentEnvironment::Green => write!(f, "green"),
+        }
+    }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ListResidencyLogsParams {
     pub contract_id: Option<String>,
     pub limit:       Option<i64>,
     pub page:        Option<i64>,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CONTRACT EVENT TYPES (issue #44)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// A contract event emitted during execution
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct ContractEvent {
+    pub id: Uuid,
+    pub contract_id: String,
+    pub topic: String,
+    pub data: Option<serde_json::Value>,
+    pub ledger_sequence: i64,
+    pub transaction_hash: Option<String>,
+    pub timestamp: DateTime<Utc>,
+    pub network: Network,
+    pub created_at: DateTime<Utc>,
+}
+
+/// Query parameters for searching events
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EventQueryParams {
+    pub topic: Option<String>,
+    pub data_pattern: Option<String>,
+    pub from_timestamp: Option<DateTime<Utc>>,
+    pub to_timestamp: Option<DateTime<Utc>>,
+    pub from_ledger: Option<i64>,
+    pub to_ledger: Option<i64>,
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+}
+
+/// Request to index a new event
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IndexEventRequest {
+    pub contract_id: String,
+    pub topic: String,
+    pub data: Option<serde_json::Value>,
+    pub ledger_sequence: i64,
+    pub transaction_hash: Option<String>,
+    pub network: Network,
+}
+
+/// Event statistics for a contract
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EventStats {
+    pub contract_id: String,
+    pub total_events: i64,
+    pub unique_topics: i64,
+    pub first_event: Option<DateTime<Utc>>,
+    pub last_event: Option<DateTime<Utc>>,
+    pub events_by_topic: serde_json::Value,
+}
+
+/// CSV export response
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EventExport {
+    pub contract_id: String,
+    pub events: Vec<ContractEvent>,
+    pub exported_at: DateTime<Utc>,
+    pub total_count: i64,
 }
