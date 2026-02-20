@@ -50,6 +50,13 @@ mod migration_cli;
 mod validation;
 mod formal_verification_handlers;
 mod formal_verification_routes;
+mod type_safety;
+mod type_safety_handlers;
+mod type_safety_routes;
+mod regression_engine;
+mod regression_handlers;
+mod regression_routes;
+mod regression_service;
 
 use anyhow::Result;
 use axum::http::{header, HeaderValue, Method};
@@ -82,6 +89,11 @@ async fn main() -> Result<()> {
     tracing::info!("database connected and migrations applied");
 
     aggregation::spawn_aggregation_task(pool.clone());
+    
+    // Spawn regression testing background services
+    tokio::spawn(regression_service::run_regression_monitor(pool.clone()));
+    tokio::spawn(regression_service::run_statistics_calculator(pool.clone()));
+    tracing::info!("regression testing services started");
 
     let state = AppState::new(pool);
     let obs = Observability::init()?;
@@ -854,6 +866,8 @@ async fn main() -> Result<()> {
         .route("/metrics", get(observability::metrics_handler))
         .merge(routes::observability_routes())
         .merge(residency_routes::residency_routes())
+        .merge(type_safety_routes::type_safety_routes())
+        .merge(regression_routes::regression_routes())
         .fallback(handlers::route_not_found)
         .layer(middleware::from_fn(metrics_middleware))
         .layer(middleware::from_fn_with_state(

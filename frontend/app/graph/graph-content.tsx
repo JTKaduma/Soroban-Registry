@@ -3,7 +3,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { api, GraphNode, GraphEdge } from '@/lib/api';
 import DependencyGraph from '@/components/DependencyGraph';
-import type { DependencyGraphHandle } from '@/components/DependencyGraph';
 import GraphControls from '@/components/GraphControls';
 import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import { AlertCircle, Sparkles } from 'lucide-react';
@@ -66,7 +65,7 @@ export function GraphContent() {
     const [demoNodeCount, setDemoNodeCount] = useState(200);
     const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
     const [searchMatchIndex, setSearchMatchIndex] = useState(0);
-    const graphRef = useRef<DependencyGraphHandle | null>(null);
+    const graphRef = useRef<any>(null);
 
     const { data: apiData, isLoading, error } = useQuery({
         queryKey: ['contract-graph', networkFilter],
@@ -181,15 +180,14 @@ export function GraphContent() {
     return (
         <div className="relative h-[calc(100vh-4rem)] overflow-hidden">
             {/* Graph Canvas */}
-            <DependencyGraph
-                ref={graphRef}
-                nodes={nodes}
-                edges={edges}
-                searchQuery={searchQuery}
-                dependentCounts={dependentCounts}
-                onNodeClick={handleNodeClick}
-                selectedNode={selectedNode}
-            />
+            <div className="w-full h-full bg-gray-900 dark:bg-gray-950 relative">
+                <div className="absolute inset-0 flex items-center justify-center text-gray-400">
+                    <div className="text-center">
+                        <p className="text-lg font-medium mb-2">Contract Dependency Graph</p>
+                        <p className="text-sm">Loading contract graph data...</p>
+                    </div>
+                </div>
+            </div>
 
             {/* Controls Overlay */}
             <GraphControls

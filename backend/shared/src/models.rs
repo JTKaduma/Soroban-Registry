@@ -93,17 +93,7 @@ pub struct ContractStats {
     pub last_interaction: Option<DateTime<Utc>>,
 }
 
-/// Contract dependency relationship
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct ContractDependency {
-    pub id: Uuid,
-    pub contract_id: Uuid,
-    pub depends_on_id: Uuid,
-    pub dependency_type: String,
-    pub created_at: DateTime<Utc>,
-}
-
-/// Graph node (minimal contract info for graph rendering)
+/// GraphNode (minimal contract info for graph rendering)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GraphNode {
     pub id: Uuid,
@@ -891,14 +881,17 @@ pub struct RollbackRequest {
 }
 
 /// Paginated response for audit log
+// TODO: Implement missing types: DeployProposal, MultisigPolicy, ProposalSignature
+// #[derive(Debug, Clone, Serialize, Deserialize)]
+// pub struct ProposalWithSignatures {
+//     pub proposal: DeployProposal,
+//     pub policy: MultisigPolicy,
+//     pub signatures: Vec<ProposalSignature>,
+//     /// How many more signatures are needed to reach the threshold
+//     pub signatures_needed: i32,
+// }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProposalWithSignatures {
-    pub proposal: DeployProposal,
-    pub policy: MultisigPolicy,
-    pub signatures: Vec<ProposalSignature>,
-    /// How many more signatures are needed to reach the threshold
-    pub signatures_needed: i32,
-}
 pub struct AuditLogPage {
     pub items:       Vec<ContractAuditLog>,
     pub total:       i64,
@@ -965,6 +958,8 @@ impl From<ContractConfig> for ContractConfigResponse {
             created_by: config.created_by,
         }
     }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // DATA RESIDENCY CONTROLS  (issue #100)
 // ═══════════════════════════════════════════════════════════════════════════

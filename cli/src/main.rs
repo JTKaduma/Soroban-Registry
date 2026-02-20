@@ -50,6 +50,9 @@ pub enum Commands {
         /// Only show verified contracts
         #[arg(long)]
         verified_only: bool,
+		  /// Output results as machine-readable JSON
+		  #[arg(long)]
+		  json: bool,
     },
 
     /// Get detailed information about a contract
@@ -94,6 +97,8 @@ pub enum Commands {
         /// Maximum number of contracts to show
         #[arg(long, default_value = "10")]
         limit: usize,
+		  #[arg(long)]
+        json: bool,
     },
 
     /// Migrate a contract to a new WASM
@@ -142,7 +147,10 @@ pub enum Commands {
 
     /// Generate documentation from a contract WASM
     Doc {
+        /// Path to contract WASM file
         contract_path: String,
+
+        /// Output directory
         #[arg(long, default_value = "docs")]
         output: String,
     },
@@ -332,6 +340,44 @@ pub enum ConfigSubcommands {
         #[arg(long)]
         created_by: String,
     },
+
+    /// Validate a contract function call for type safety
+    ValidateCall {
+        /// Contract ID to validate against
+        contract_id: String,
+        /// Method name to call
+        method_name: String,
+        /// Parameters (positional arguments after method name)
+        #[arg(trailing_var_arg = true)]
+        params: Vec<String>,
+        /// Enable strict mode (no implicit type conversions)
+        #[arg(long)]
+        strict: bool,
+    },
+
+    /// Generate type-safe bindings for a contract
+    GenerateBindings {
+        /// Contract ID to generate bindings for
+        contract_id: String,
+        /// Output language: typescript or rust
+        #[arg(long, default_value = "typescript")]
+        language: String,
+        /// Output file path (defaults to stdout)
+        #[arg(long, short)]
+        output: Option<String>,
+    },
+
+    /// List functions available on a contract
+    ListFunctions {
+        /// Contract ID to list functions for
+        contract_id: String,
+    },
+
+    /// Get trust score for a contract
+    TrustScore {
+        /// Contract UUID to score
+        contract_id: String,
+    },
 }
 
 /// Sub-commands for the `sla` group
@@ -483,9 +529,9 @@ async fn main() -> Result<()> {
     log::debug!("Network: {:?}", network);
 
     match cli.command {
-        Commands::Search { query, verified_only } => {
+         Commands::Search { query, verified_only, json } => {
             log::debug!("Command: search | query={:?} verified_only={}", query, verified_only);
-            commands::search(&cli.api_url, &query, network, verified_only).await?;
+            ccommands::search(&cli.api_url, &query, network, verified_only, json).await?;
         }
         Commands::Info { contract_id } => {
             log::debug!("Command: info | contract_id={}", contract_id);
@@ -507,9 +553,9 @@ async fn main() -> Result<()> {
                 category.as_deref(), tags_vec, &publisher,
             ).await?;
         }
-        Commands::List { limit } => {
+         Commands::List { limit, json } => {
             log::debug!("Command: list | limit={}", limit);
-            commands::list(&cli.api_url, limit, network).await?;
+            commands::list(&cli.api_url, limit, network, json).await?;
         }
         Commands::Migrate { contract_id, wasm, simulate_fail, dry_run } => {
             log::debug!(
