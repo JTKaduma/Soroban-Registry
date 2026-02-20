@@ -14,8 +14,13 @@ pub async fn run(_api_url: &str) -> Result<()> {
 
     let network = prompt_with_validation(
         "Select network [mainnet|testnet|futurenet] (default: testnet)",
-        Some("testnet"),
-        |s| matches!(s.to_lowercase().as_str(), "mainnet" | "testnet" | "futurenet"),
+        Some("testnet".to_string()),
+        |s| {
+            matches!(
+                s.to_lowercase().as_str(),
+                "mainnet" | "testnet" | "futurenet"
+            )
+        },
         "Invalid network. Choose mainnet, testnet, or futurenet.",
     )?;
 
@@ -49,12 +54,13 @@ pub async fn run(_api_url: &str) -> Result<()> {
     let params_value = if params_raw.trim().is_empty() {
         serde_json::Value::Object(Default::default())
     } else {
-        serde_json::from_str::<serde_json::Value>(params_raw.trim()).context("Invalid JSON for params")?
+        serde_json::from_str::<serde_json::Value>(params_raw.trim())
+            .context("Invalid JSON for params")?
     };
 
     let max_fee_str = prompt_with_validation(
         "Max fee (stroops), integer",
-        Some("100000".into()),
+        Some("100000".to_string()),
         |s| s.trim().parse::<u64>().is_ok(),
         "Provide a positive integer.",
     )?;
@@ -62,12 +68,23 @@ pub async fn run(_api_url: &str) -> Result<()> {
 
     println!("\n{}", "Deployment Plan Preview".bold().cyan());
     println!("{}", "-".repeat(80).cyan());
-    println!("{}: {}", "Network".bold(), network.to_lowercase().bright_blue());
-    println!("{}: {}", "Signer".bold(), mask_secret(&signer).bright_black());
+    println!(
+        "{}: {}",
+        "Network".bold(),
+        network.to_lowercase().bright_blue()
+    );
+    println!(
+        "{}: {}",
+        "Signer".bold(),
+        mask_secret(&signer).bright_black()
+    );
     println!("{}: {}", "WASM".bold(), wasm_path.as_str().bright_black());
     println!("{}: {}", "Max Fee".bold(), max_fee);
     println!("{}:", "Params".bold());
-    println!("{}", serde_json::to_string_pretty(&params_value).unwrap_or_default());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&params_value).unwrap_or_default()
+    );
     println!("{}", "-".repeat(80).cyan());
 
     let proceed = confirm("Proceed to dry-run? [y/N]", false)?;
@@ -109,11 +126,14 @@ pub async fn run(_api_url: &str) -> Result<()> {
     }
 
     let soroban_available = detect_soroban();
-    let mut status = "success";
-    let mut error_msg: Option<String> = None;
+    let status = "success";
+    let error_msg: Option<String> = None;
 
     if soroban_available {
-        println!("{}", "soroban CLI detected. Simulating deployment...".bright_black());
+        println!(
+            "{}",
+            "soroban CLI detected. Simulating deployment...".bright_black()
+        );
     } else {
         println!(
             "{}",
@@ -193,7 +213,9 @@ pub fn show_history(search: Option<&str>, limit: usize) -> Result<()> {
                 v.get("status").and_then(|x| x.as_str()).unwrap_or(""),
                 v.get("network").and_then(|x| x.as_str()).unwrap_or(""),
                 v.get("wasm").and_then(|x| x.as_str()).unwrap_or(""),
-                v.get("signer_masked").and_then(|x| x.as_str()).unwrap_or("")
+                v.get("signer_masked")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("")
             )
             .to_lowercase();
             if !hay.contains(q) {
@@ -211,7 +233,10 @@ pub fn show_history(search: Option<&str>, limit: usize) -> Result<()> {
     if count == 0 {
         println!("{}", "No matching records.".yellow());
     } else {
-        println!("\n{}", format!("Showing {} record(s)", count).bright_black());
+        println!(
+            "\n{}",
+            format!("Showing {} record(s)", count).bright_black()
+        );
     }
     println!();
     Ok(())
@@ -277,7 +302,14 @@ fn mask_secret(s: &str) -> String {
 }
 
 fn prompt(label: &str, default: Option<String>) -> Result<String> {
-    print!("{}{}: ", label.bold(), default.as_ref().map(|d| format!(" [{}]", d)).unwrap_or_default());
+    print!(
+        "{}{}: ",
+        label.bold(),
+        default
+            .as_ref()
+            .map(|d| format!(" [{}]", d))
+            .unwrap_or_default()
+    );
     io::stdout().flush().ok();
     let mut buf = String::new();
     io::stdin().read_line(&mut buf)?;
@@ -291,7 +323,7 @@ fn prompt(label: &str, default: Option<String>) -> Result<String> {
 
 fn prompt_with_validation<F>(
     label: &str,
-    default: Option<impl Into<String>>,
+    default: Option<String>,
     validate: F,
     error_msg: &str,
 ) -> Result<String>
@@ -299,8 +331,7 @@ where
     F: Fn(&str) -> bool,
 {
     loop {
-        let def = default.as_ref().map(|d| d.into());
-        let value = prompt(label, def.clone().map(|s| s.into()))?;
+        let value = prompt(label, default.clone())?;
         if validate(&value) {
             return Ok(value);
         }

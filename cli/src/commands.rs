@@ -14,7 +14,10 @@ pub async fn search(
     verified_only: bool,
 ) -> Result<()> {
     let client = reqwest::Client::new();
-    let mut url = format!("{}/api/contracts?query={}&network={}", api_url, query, network);
+    let mut url = format!(
+        "{}/api/contracts?query={}&network={}",
+        api_url, query, network
+    );
 
     if verified_only {
         url.push_str("&verified_only=true");
@@ -68,7 +71,10 @@ pub async fn search(
 
 pub async fn info(api_url: &str, contract_id: &str, network: Network) -> Result<()> {
     let client = reqwest::Client::new();
-    let url = format!("{}/api/contracts/{}?network={}", api_url, contract_id, network);
+    let url = format!(
+        "{}/api/contracts/{}?network={}",
+        api_url, contract_id, network
+    );
 
     let response = client
         .get(&url)
@@ -85,9 +91,21 @@ pub async fn info(api_url: &str, contract_id: &str, network: Network) -> Result<
     println!("\n{}", "Contract Information:".bold().cyan());
     println!("{}", "=".repeat(80).cyan());
 
-    println!("\n{}: {}", "Name".bold(), contract["name"].as_str().unwrap_or("Unknown"));
-    println!("{}: {}", "Contract ID".bold(), contract["contract_id"].as_str().unwrap_or(""));
-    println!("{}: {}", "Network".bold(), contract["network"].as_str().unwrap_or("").bright_blue());
+    println!(
+        "\n{}: {}",
+        "Name".bold(),
+        contract["name"].as_str().unwrap_or("Unknown")
+    );
+    println!(
+        "{}: {}",
+        "Contract ID".bold(),
+        contract["contract_id"].as_str().unwrap_or("")
+    );
+    println!(
+        "{}: {}",
+        "Network".bold(),
+        contract["network"].as_str().unwrap_or("").bright_blue()
+    );
 
     let is_verified = contract["is_verified"].as_bool().unwrap_or(false);
     println!(
@@ -163,9 +181,21 @@ pub async fn publish(
     let contract: serde_json::Value = response.json().await?;
 
     println!("{}", "✓ Contract published successfully!".green().bold());
-    println!("\n{}: {}", "Name".bold(), contract["name"].as_str().unwrap_or(""));
-    println!("{}: {}", "ID".bold(), contract["contract_id"].as_str().unwrap_or(""));
-    println!("{}: {}", "Network".bold(), contract["network"].as_str().unwrap_or("").bright_blue());
+    println!(
+        "\n{}: {}",
+        "Name".bold(),
+        contract["name"].as_str().unwrap_or("")
+    );
+    println!(
+        "{}: {}",
+        "ID".bold(),
+        contract["contract_id"].as_str().unwrap_or("")
+    );
+    println!(
+        "{}: {}",
+        "Network".bold(),
+        contract["network"].as_str().unwrap_or("").bright_blue()
+    );
     println!();
 
     Ok(())
@@ -173,7 +203,10 @@ pub async fn publish(
 
 pub async fn list(api_url: &str, limit: usize, network: Network) -> Result<()> {
     let client = reqwest::Client::new();
-    let url = format!("{}/api/contracts?page_size={}&network={}", api_url, limit, network);
+    let url = format!(
+        "{}/api/contracts?page_size={}&network={}",
+        api_url, limit, network
+    );
 
     let response = client
         .get(&url)
@@ -202,9 +235,17 @@ pub async fn list(api_url: &str, limit: usize, network: Network) -> Result<()> {
             "\n{}. {} {}",
             i + 1,
             name.bold(),
-            if is_verified { "✓".green() } else { "".normal() }
+            if is_verified {
+                "✓".green()
+            } else {
+                "".normal()
+            }
         );
-        println!("   {} | {}", contract_id.bright_black(), network.bright_blue());
+        println!(
+            "   {} | {}",
+            contract_id.bright_black(),
+            network.bright_blue()
+        );
     }
 
     println!("\n{}", "=".repeat(80).cyan());
@@ -244,7 +285,10 @@ pub async fn migrate(
     if dry_run {
         println!("\n{}", "[DRY RUN] No changes will be made.".yellow().bold());
         println!("Would create migration record...");
-        println!("Would execute: soroban contract invoke --id {} --wasm {} ...", contract_id, wasm_path);
+        println!(
+            "Would execute: soroban contract invoke --id {} --wasm {} ...",
+            contract_id, wasm_path
+        );
         return Ok(());
     }
 
@@ -258,7 +302,8 @@ pub async fn migrate(
     });
 
     print!("\nInitializing migration... ");
-    let response = client.post(&create_url)
+    let response = client
+        .post(&create_url)
         .json(&payload)
         .send()
         .await
@@ -279,31 +324,46 @@ pub async fn migrate(
     println!("\n{}", "Executing migration logic...".bold());
 
     // Check if soroban is installed
-    let version_output = Command::new("soroban")
-        .arg("--version")
-        .output()
-        .await;
+    let version_output = Command::new("soroban").arg("--version").output().await;
 
     let (status, log_output) = if version_output.is_err() {
-        println!("{}", "Warning: 'soroban' CLI not found. Running in MOCK mode.".yellow());
+        println!(
+            "{}",
+            "Warning: 'soroban' CLI not found. Running in MOCK mode.".yellow()
+        );
 
         if simulate_fail {
             println!("{}", "Simulating FAILURE...".red());
-            (shared::models::MigrationStatus::Failed, "Simulation: Migration failed as requested.".to_string())
+            (
+                shared::models::MigrationStatus::Failed,
+                "Simulation: Migration failed as requested.".to_string(),
+            )
         } else {
             println!("{}", "Simulating SUCCESS...".green());
-            (shared::models::MigrationStatus::Success, "Simulation: Migration succeeded.".to_string())
+            (
+                shared::models::MigrationStatus::Success,
+                "Simulation: Migration succeeded.".to_string(),
+            )
         }
     } else {
         // Real execution would go here. For now we will just mock it even if soroban exists
         // because we don't have a real contract to invoke in this environment.
-        println!("{}", "Soroban CLI found, but full integration is pending. Running in MOCK mode.".yellow());
+        println!(
+            "{}",
+            "Soroban CLI found, but full integration is pending. Running in MOCK mode.".yellow()
+        );
         if simulate_fail {
             println!("{}", "Simulating FAILURE...".red());
-            (shared::models::MigrationStatus::Failed, "Simulation: Migration failed as requested.".to_string())
+            (
+                shared::models::MigrationStatus::Failed,
+                "Simulation: Migration failed as requested.".to_string(),
+            )
         } else {
             println!("{}", "Simulating SUCCESS...".green());
-            (shared::models::MigrationStatus::Success, "Simulation: Migration executed successfully via soroban CLI (mocked).".to_string())
+            (
+                shared::models::MigrationStatus::Success,
+                "Simulation: Migration executed successfully via soroban CLI (mocked).".to_string(),
+            )
         }
     };
 
@@ -314,7 +374,8 @@ pub async fn migrate(
         "log_output": log_output
     });
 
-    let update_res = client.put(&update_url)
+    let update_res = client
+        .put(&update_url)
         .json(&update_payload)
         .send()
         .await
@@ -357,7 +418,11 @@ pub async fn export(
     };
 
     let source = std::path::Path::new(contract_dir);
-    anyhow::ensure!(source.is_dir(), "contract directory does not exist: {}", contract_dir);
+    anyhow::ensure!(
+        source.is_dir(),
+        "contract directory does not exist: {}",
+        contract_dir
+    );
 
     crate::export::create_archive(
         source,
@@ -390,13 +455,28 @@ pub async fn import(
 
     let manifest = crate::import::extract_and_verify(archive_path, dest)?;
 
-    println!("{}", "✓ Import complete — integrity verified!".green().bold());
-    println!("  {}: {}", "Contract".bold(), manifest.contract_id.bright_black());
+    println!(
+        "{}",
+        "✓ Import complete — integrity verified!".green().bold()
+    );
+    println!(
+        "  {}: {}",
+        "Contract".bold(),
+        manifest.contract_id.bright_black()
+    );
     println!("  {}: {}", "Name".bold(), manifest.name);
-    println!("  {}: {}", "Network".bold(), network.to_string().bright_blue());
+    println!(
+        "  {}: {}",
+        "Network".bold(),
+        network.to_string().bright_blue()
+    );
     println!("  {}: {}", "SHA-256".bold(), manifest.sha256.bright_black());
     println!("  {}: {}", "Exported At".bold(), manifest.exported_at);
-    println!("  {}: {} file(s)", "Contents".bold(), manifest.contents.len());
+    println!(
+        "  {}: {} file(s)",
+        "Contents".bold(),
+        manifest.contents.len()
+    );
     println!("  {}: {}", "Extracted To".bold(), output_dir);
 
     println!(
@@ -435,15 +515,27 @@ pub async fn patch_create(
     println!("{}", "✓ Patch created!".green().bold());
     println!("  {}: {}", "ID".bold(), patch.id);
     println!("  {}: {}", "Target Version".bold(), patch.target_version);
-    println!("  {}: {}", "Severity".bold(), severity_colored(&patch.severity));
-    println!("  {}: {}", "New WASM Hash".bold(), patch.new_wasm_hash.bright_black());
+    println!(
+        "  {}: {}",
+        "Severity".bold(),
+        severity_colored(&patch.severity)
+    );
+    println!(
+        "  {}: {}",
+        "New WASM Hash".bold(),
+        patch.new_wasm_hash.bright_black()
+    );
     println!("  {}: {}%\n", "Rollout".bold(), patch.rollout_percentage);
 
     if matches!(patch.severity, Severity::Critical | Severity::High) {
         println!(
             "  {} {}",
             "⚠".red(),
-            format!("{} severity — immediate action recommended", severity_colored(&patch.severity)).red()
+            format!(
+                "{} severity — immediate action recommended",
+                severity_colored(&patch.severity)
+            )
+            .red()
         );
     }
 
@@ -487,11 +579,7 @@ pub async fn patch_notify(api_url: &str, patch_id: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn patch_apply(
-    api_url: &str,
-    contract_id: &str,
-    patch_id: &str,
-) -> Result<()> {
+pub async fn patch_apply(api_url: &str, contract_id: &str, patch_id: &str) -> Result<()> {
     println!("\n{}", "Applying security patch...".bold().cyan());
 
     let audit = PatchManager::apply(api_url, contract_id, patch_id).await?;
@@ -501,5 +589,36 @@ pub async fn patch_apply(
     println!("  {}: {}", "Patch".bold(), audit.patch_id);
     println!("  {}: {}\n", "Applied At".bold(), audit.applied_at);
 
+    Ok(())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DOCUMENTATION GENERATION
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub fn doc(contract_path: &str, output_dir: &str) -> Result<()> {
+    println!("{}", "Generating documentation...".bold().cyan());
+
+    // Extract ABI
+    // Note: This requires the `shared` crate to export `extract_abi`
+    let abi_entries = extract_abi(contract_path).context("Failed to extract ABI from WASM")?;
+
+    let filename = std::path::Path::new(contract_path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("contract");
+
+    // Generate Markdown
+    let markdown = generate_markdown(&abi_entries, filename);
+
+    // Write to output
+    fs::create_dir_all(output_dir)
+        .with_context(|| format!("Failed to create output directory: {}", output_dir))?;
+
+    let out_path = std::path::Path::new(output_dir).join(format!("{}.md", filename));
+    fs::write(&out_path, markdown)
+        .with_context(|| format!("Failed to write documentation to {:?}", out_path))?;
+
+    println!("{} Documentation generated at {:?}", "✓".green(), out_path);
     Ok(())
 }

@@ -149,8 +149,8 @@ impl<T> PaginatedResponse<T> {
             total,
             page,
             total_pages,
+        }
     }
-}
 }
 
 /// Migration status
@@ -320,6 +320,8 @@ pub struct TopUser {
 pub struct TimelineEntry {
     pub date: chrono::NaiveDate,
     pub count: i64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeployGreenRequest {
     pub contract_id: String,
@@ -337,4 +339,120 @@ pub struct HealthCheckRequest {
     pub contract_id: String,
     pub environment: DeploymentEnvironment,
     pub passed: bool,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MULTI-SIGNATURE DEPLOYMENT TYPES  (issue #47)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Lifecycle of a multi-sig deployment proposal
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, sqlx::Type)]
+#[sqlx(type_name = "proposal_status", rename_all = "lowercase")]
+pub enum ProposalStatus {
+    Pending,
+    Approved,
+    Executed,
+    Expired,
+    Rejected,
+}
+
+impl std::fmt::Display for ProposalStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            ProposalStatus::Pending => "pending",
+            ProposalStatus::Approved => "approved",
+            ProposalStatus::Executed => "executed",
+            ProposalStatus::Expired => "expired",
+            ProposalStatus::Rejected => "rejected",
+        };
+        write!(f, "{}", s)
+    }
+}
+
+/// A multi-sig policy defining signers and required threshold
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct MultisigPolicy {
+    pub id: Uuid,
+    pub name: String,
+    /// Minimum number of signatures required (M in M-of-N)
+    pub threshold: i32,
+    /// Stellar addresses authorised to sign proposals using this policy
+    pub signer_addresses: Vec<String>,
+    /// How long (seconds) a proposal under this policy stays valid
+    pub expiry_seconds: i32,
+    pub created_by: String,
+    pub created_at: DateTime<Utc>,
+}
+
+/// A pending (or resolved) deployment proposal
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct DeployProposal {
+    pub id: Uuid,
+    pub contract_name: String,
+    pub contract_id: String,
+    pub wasm_hash: String,
+    pub network: Network,
+    pub description: Option<String>,
+    pub policy_id: Uuid,
+    pub status: ProposalStatus,
+    pub expires_at: DateTime<Utc>,
+    pub executed_at: Option<DateTime<Utc>>,
+    pub proposer: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// A single signature on a deployment proposal
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct ProposalSignature {
+    pub id: Uuid,
+    pub proposal_id: Uuid,
+    pub signer_address: String,
+    pub signature_data: Option<String>,
+    pub signed_at: DateTime<Utc>,
+}
+
+// ── Request / Response DTOs ───────────────────────────────────────────────
+
+/// POST /api/multisig/policies
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreatePolicyRequest {
+    pub name: String,
+    /// M-of-N threshold (must be ≥ 1 and ≤ number of signers)
+    pub threshold: i32,
+    /// Comma-separated list acceptable; server always stores as Vec<String>
+    pub signer_addresses: Vec<String>,
+    /// Seconds until unsigned proposals expire (default: 86400 = 24 h)
+    pub expiry_seconds: Option<i32>,
+    pub created_by: String,
+}
+
+/// POST /api/contracts/deploy-proposal
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateProposalRequest {
+    pub contract_name: String,
+    pub contract_id: String,
+    pub wasm_hash: String,
+    pub network: Network,
+    pub description: Option<String>,
+    pub policy_id: Uuid,
+    pub proposer: String,
+}
+
+/// POST /api/contracts/{id}/sign
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SignProposalRequest {
+    pub signer_address: String,
+    /// Optional raw signature bytes (hex-encoded) for off-chain validation
+    pub signature_data: Option<String>,
+}
+
+/// Rich response combining a proposal with its signatures and policy
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProposalWithSignatures {
+    pub proposal: DeployProposal,
+    pub policy: MultisigPolicy,
+    pub signatures: Vec<ProposalSignature>,
+    /// How many more signatures are needed to reach the threshold
+    pub signatures_needed: i32,
 }

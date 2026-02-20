@@ -6,6 +6,8 @@ mod benchmark_routes;
 mod checklist;
 mod detector;
 mod handlers;
+mod multisig_handlers;
+mod multisig_routes;
 mod routes;
 mod scoring;
 mod state;
@@ -78,6 +80,7 @@ async fn main() -> Result<()> {
         .merge(routes::publisher_routes())
         .merge(routes::health_routes())
         .merge(routes::migration_routes())
+        .merge(multisig_routes::multisig_routes())
         .fallback(handlers::route_not_found)
         .layer(middleware::from_fn(request_logger))
         .layer(middleware::from_fn_with_state(
