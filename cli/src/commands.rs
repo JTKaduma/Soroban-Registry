@@ -8,6 +8,7 @@ use std::path::Path;
 
 use crate::patch::{PatchManager, Severity};
 use crate::profiler;
+use crate::test_framework;
 
 pub async fn search(
     api_url: &str,
@@ -709,6 +710,118 @@ pub async fn profile(
 
     println!("\n{}", "=".repeat(80).cyan());
     println!();
+
+    Ok(())
+}
+
+pub async fn run_tests(
+    test_file: &str,
+    contract_path: Option<&str>,
+    junit_output: Option<&str>,
+    show_coverage: bool,
+    verbose: bool,
+) -> Result<()> {
+    let test_path = Path::new(test_file);
+    if !test_path.exists() {
+        anyhow::bail!("Test file not found: {}", test_file);
+    }
+
+    let contract_dir = contract_path.unwrap_or(".");
+    let mut runner = test_framework::TestRunner::new(contract_dir)?;
+
+    println!("\n{}", "Running Integration Tests...".bold().cyan());
+    println!("{}", "=".repeat(80).cyan());
+
+    let scenario = test_framework::load_test_scenario(test_path)?;
+    
+    if verbose {
+        println!("\n{}: {}", "Scenario".bold(), scenario.name);
+        if let Some(desc) = &scenario.description {
+            println!("{}: {}", "Description".bold(), desc);
+        }
+        println!("{}: {}", "Steps".bold(), scenario.steps.len());
+    }
+
+    let start_time = std::time::Instant::now();
+    let result = runner.run_scenario(scenario).await?;
+    let total_time = start_time.elapsed();
+
+    println!("\n{}", "Test Results:".bold().green());
+    println!("{}", "=".repeat(80).cyan());
+
+    let status_icon = if result.passed { "✓" } else { "✗" };
+    
+    println!(
+        "\n{} {} {} ({:.2}ms)",
+        status_icon,
+        "Scenario:".bold(),
+        result.scenario.bold(),
+        result.duration.as_secs_f64() * 1000.0
+    );
+
+    if !result.passed {
+        if let Some(ref err) = result.error {
+            println!("{} {}", "Error:".bold().red(), err);
+        }
+    }
+
+    println!("\n{}", "Step Results:".bold());
+    for (i, step) in result.steps.iter().enumerate() {
+        let step_icon = if step.passed { "✓" } else { "✗" };
+        
+        println!(
+            "  {}. {} {} ({:.2}ms)",
+            i + 1,
+            step_icon,
+            step.step_name.bold(),
+            step.duration.as_secs_f64() * 1000.0
+        );
+
+        if verbose {
+            println!(
+                "     Assertions: {}/{} passed",
+                step.assertions_passed,
+                step.assertions_passed + step.assertions_failed
+            );
+        }
+
+        if let Some(ref err) = step.error {
+            println!("     {}", err.red());
+        }
+    }
+
+    if show_coverage {
+        println!("\n{}", "Coverage Report:".bold().magenta());
+        println!("  Contracts Tested: {}", result.coverage.contracts_tested);
+        println!("  Methods Tested: {}/{}", 
+            result.coverage.methods_tested, 
+            result.coverage.total_methods
+        );
+        println!("  Coverage: {:.2}%", result.coverage.coverage_percent);
+        
+        if result.coverage.coverage_percent < 80.0 {
+            println!("  {} Low coverage detected!", "⚠".yellow());
+        }
+    }
+
+    if let Some(junit_path) = junit_output {
+        test_framework::generate_junit_xml(&[result], Path::new(junit_path))?;
+        println!("\n{} JUnit XML report exported to: {}", "✓".green(), junit_path);
+    }
+
+    if total_time.as_secs() > 5 {
+        println!("\n{} Test execution took {:.2}s (target: <5s)", 
+            "⚠".yellow(), 
+            total_time.as_secs_f64()
+        );
+    }
+
+    println!("\n{}", "=".repeat(80).cyan());
+    println!();
+
+    if !result.passed {
+        anyhow::bail!("Tests failed");
+    }
 
     Ok(())
 }

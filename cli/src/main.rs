@@ -6,6 +6,7 @@ mod manifest;
 mod multisig;
 mod patch;
 mod profiler;
+mod test_framework;
 mod wizard;
 
 use anyhow::Result;
@@ -187,6 +188,28 @@ pub enum Commands {
         /// Show recommendations
         #[arg(long, default_value = "true")]
         recommendations: bool,
+    },
+
+    /// Run integration tests
+    Test {
+        /// Path to test file (YAML or JSON)
+        test_file: String,
+
+        /// Path to contract directory or file
+        #[arg(long)]
+        contract_path: Option<String>,
+
+        /// Output JUnit XML report
+        #[arg(long)]
+        junit: Option<String>,
+
+        /// Show coverage report
+        #[arg(long, default_value = "true")]
+        coverage: bool,
+
+        /// Verbose output
+        #[arg(long, short)]
+        verbose: bool,
     },
 }
 
@@ -501,6 +524,22 @@ async fn main() -> Result<()> {
                 flamegraph.as_deref(),
                 compare.as_deref(),
                 recommendations,
+            )
+            .await?;
+        }
+        Commands::Test {
+            test_file,
+            contract_path,
+            junit,
+            coverage,
+            verbose,
+        } => {
+            commands::run_tests(
+                &test_file,
+                contract_path.as_deref(),
+                junit.as_deref(),
+                coverage,
+                verbose,
             )
             .await?;
         }
