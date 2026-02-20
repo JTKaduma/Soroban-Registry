@@ -139,10 +139,7 @@ pub enum Commands {
 
     /// Generate documentation from a contract WASM
     Doc {
-        /// Path to contract WASM file
         contract_path: String,
-
-        /// Output directory
         #[arg(long, default_value = "docs")]
         output: String,
     },
@@ -327,6 +324,10 @@ pub enum PatchCommands {
         severity: String,
         #[arg(long, default_value = "100")]
         rollout: u8,
+    },
+    Notify {
+        #[arg(long)]
+        patch_id: String,
     },
     /// Notify subscribers about a patch
     Notify { patch_id: String },

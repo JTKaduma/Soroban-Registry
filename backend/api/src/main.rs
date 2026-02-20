@@ -25,6 +25,8 @@ mod residency_handlers;
 mod residency_routes;
 mod routes;
 mod state;
+mod template_handlers;
+mod template_routes;
 mod trust;
 mod health_monitor;
 mod migration_cli;
@@ -100,6 +102,8 @@ async fn main() -> Result<()> {
         .merge(multisig_routes::multisig_routes())
         .merge(audit_routes::audit_routes())
         .merge(benchmark_routes::benchmark_routes())
+        .merge(contract_history_routes::contract_history_routes())
+        .merge(template_routes::template_routes())
         .merge(routes::observability_routes())
         .merge(residency_routes::residency_routes())
         .fallback(handlers::route_not_found)
