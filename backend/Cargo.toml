@@ -1,11 +1,5 @@
 [workspace]
-members = [
-    "api",
-    "indexer",
-    "verifier",
-    "shared",
-    "seeder",
-]
+members = ["api", "indexer", "verifier", "shared", "seeder"]
 resolver = "2"
 
 [workspace.package]
@@ -22,7 +16,14 @@ tower = "0.4"
 tower-http = { version = "0.5", features = ["cors", "trace"] }
 
 # Database
-sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "json", "rust_decimal"] }
+sqlx = { version = "0.8", features = [
+    "runtime-tokio-rustls",
+    "postgres",
+    "uuid",
+    "chrono",
+    "json",
+    "rust_decimal",
+] }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
@@ -32,25 +33,41 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
 # HTTP client
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = [
+    "json",
+    "rustls-tls",
+] }
 
 # Error handling
 anyhow = "1.0"
 thiserror = "1.0"
 
-# Logging
+# Logging / Tracing
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-opentelemetry = "0.24"
+
+# OpenTelemetry
+opentelemetry = { version = "0.23", features = ["trace"] }
+opentelemetry_sdk = { version = "0.23", features = ["rt-tokio", "trace"] }
+opentelemetry-otlp = { version = "0.16", features = ["grpc-tonic", "trace"] }
+opentelemetry-prometheus = "0.16"
+
+# Metrics
+prometheus = { version = "0.13", features = ["process"] }
+once_cell = "1.19"
 
 # Utilities
 uuid = { version = "1.0", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 dotenv = "0.15"
 
-# Observability
-prometheus = { version = "0.13", features = ["process"] }
-opentelemetry = { version = "0.27", features = ["trace"] }
-opentelemetry_sdk = { version = "0.27", features = ["rt-tokio"] }
-opentelemetry-otlp = { version = "0.27", features = ["grpc-tonic"] }
-tracing-opentelemetry = "0.28"
-once_cell = "1.0"
+# CLI
+clap = { version = "4.5", features = ["derive"] }
+
+# Encryption
+aes-gcm = "0.10"
+rand = "0.8"
+base64 = "0.22"
+sha2 = "0.10"
+hex = "0.4"

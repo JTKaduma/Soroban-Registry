@@ -38,7 +38,7 @@ pub async fn get_contract_history(
     verify_contract_exists(&state, contract_id).await?;
 
     let entries: Vec<ContractAuditLog> = sqlx::query_as(
-        "SELECT id, contract_id, action_type, old_value, new_value, changed_by, timestamp
+        "SELECT id, contract_id, action_type, old_value, new_value, changed_by, timestamp, previous_hash, hash, signature
            FROM contract_audit_log
           WHERE contract_id = $1
           ORDER BY timestamp DESC
@@ -91,7 +91,7 @@ pub async fn get_full_history(
     .map_err(|e| db_err("count audit log", e))?;
 
     let items: Vec<ContractAuditLog> = sqlx::query_as(
-        "SELECT id, contract_id, action_type, old_value, new_value, changed_by, timestamp
+        "SELECT id, contract_id, action_type, old_value, new_value, changed_by, timestamp, previous_hash, hash, signature
            FROM contract_audit_log
           WHERE contract_id = $1
           ORDER BY timestamp DESC
@@ -131,7 +131,7 @@ pub async fn export_history_csv(
         .map_err(|_| StatusCode::NOT_FOUND)?;
 
     let entries: Vec<ContractAuditLog> = sqlx::query_as(
-        "SELECT id, contract_id, action_type, old_value, new_value, changed_by, timestamp
+        "SELECT id, contract_id, action_type, old_value, new_value, changed_by, timestamp, previous_hash, hash, signature
            FROM contract_audit_log
           WHERE contract_id = $1
           ORDER BY timestamp ASC",
@@ -141,7 +141,7 @@ pub async fn export_history_csv(
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let mut csv = String::from("id,contract_id,action_type,old_value,new_value,changed_by,timestamp\n");
+    let mut csv = String::from("id,contract_id,action_type,old_value,new_value,changed_by,timestamp,previous_hash,hash,signature\n");
 
     for entry in &entries {
         let old = entry
@@ -157,8 +157,12 @@ pub async fn export_history_csv(
             .unwrap_or_default()
             .replace('"', "\"\"");
 
+        let ph = entry.previous_hash.as_deref().unwrap_or("");
+        let h = entry.hash.as_deref().unwrap_or("");
+        let sig = entry.signature.as_deref().unwrap_or("");
+
         csv.push_str(&format!(
-            "{},{},{},\"{}\",\"{}\",{},{}\n",
+            "{},{},{},\"{}\",\"{}\",{},{},{},{},{}\n",
             entry.id,
             entry.contract_id,
             entry.action_type,
@@ -166,6 +170,7 @@ pub async fn export_history_csv(
             new,
             entry.changed_by,
             entry.timestamp.to_rfc3339(),
+            ph, h, sig
         ));
     }
 
@@ -183,6 +188,76 @@ pub async fn export_history_csv(
         csv,
     )
         .into_response())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/contracts/:id/history/verify
+// Iterates the history to verify the cryptographic hash-chain.
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn verify_contract_history(
+    State(state): State<AppState>,
+    Path(contract_id): Path<Uuid>,
+) -> ApiResult<Json<serde_json::Value>> {
+    verify_contract_exists(&state, contract_id).await?;
+
+    let entries: Vec<ContractAuditLog> = sqlx::query_as(
+        "SELECT id, contract_id, action_type, old_value, new_value, changed_by, timestamp, previous_hash, hash, signature
+           FROM contract_audit_log
+          WHERE contract_id = $1
+          ORDER BY timestamp ASC",
+    )
+    .bind(contract_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| db_err("fetch entire audit log", e))?;
+
+    use sha2::{Sha256, Digest};
+    let mut expected_prev: Option<String> = None;
+
+    for entry in &entries {
+        if entry.previous_hash != expected_prev {
+            return Ok(Json(serde_json::json!({
+                "valid": false,
+                "error": format!("Hash chain broken at log {}. Expected previous {}, got {:?}", entry.id, expected_prev.unwrap_or_default(), entry.previous_hash)
+            })));
+        }
+
+        let mut hasher = Sha256::new();
+        if let Some(ph) = &entry.previous_hash {
+            hasher.update(ph.as_bytes());
+        }
+        hasher.update(entry.contract_id.as_bytes());
+        hasher.update(entry.action_type.to_string().as_bytes());
+        hasher.update(entry.changed_by.as_bytes());
+        if let Some(nv) = &entry.new_value {
+            hasher.update(nv.to_string().as_bytes());
+        }
+        let computed_hash = hex::encode(hasher.finalize());
+        
+        if Some(computed_hash.clone()) != entry.hash {
+            return Ok(Json(serde_json::json!({
+                "valid": false,
+                "error": format!("Hash mismatch at log {}. Computed {}, got {:?}", entry.id, computed_hash, entry.hash)
+            })));
+        }
+
+        // Dummy signature validation
+        let expected_sig = format!("sig_{}", hex::encode(&computed_hash[0..16]));
+        if Some(expected_sig.clone()) != entry.signature {
+            return Ok(Json(serde_json::json!({
+                "valid": false,
+                "error": format!("Signature mismatch at log {}. Expected {}, got {:?}", entry.id, expected_sig, entry.signature)
+            })));
+        }
+
+        expected_prev = Some(computed_hash);
+    }
+
+    Ok(Json(serde_json::json!({
+        "valid": true,
+        "verified_entries_count": entries.len()
+    })))
+
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -374,13 +449,36 @@ pub async fn log_contract_change(
     new_value: Option<serde_json::Value>,
     changed_by: &str,
 ) -> Result<Uuid, sqlx::Error> {
+    use sha2::{Sha256, Digest};
     let mut tx = db.begin().await?;
+
+    // 1. Fetch the latest hash to use as previous_hash
+    let prev_hash: Option<String> = sqlx::query_scalar(
+        "SELECT hash FROM contract_audit_log WHERE contract_id = $1 ORDER BY timestamp DESC LIMIT 1"
+    )
+    .bind(contract_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+
+    // 2. Compute new hash
+    let mut hasher = Sha256::new();
+    if let Some(ph) = &prev_hash {
+        hasher.update(ph.as_bytes());
+    }
+    hasher.update(contract_id.as_bytes());
+    hasher.update(action_type.to_string().as_bytes());
+    hasher.update(changed_by.as_bytes());
+    if let Some(nv) = &new_value {
+        hasher.update(nv.to_string().as_bytes());
+    }
+    let new_hash = hex::encode(hasher.finalize());
+    let dummy_signature = format!("sig_{}", hex::encode(&new_hash[0..16])); // dummy implemented signature per plan
 
     // Insert audit log row
     let (log_id,): (Uuid,) = sqlx::query_as(
         "INSERT INTO contract_audit_log
-               (contract_id, action_type, old_value, new_value, changed_by)
-         VALUES ($1, $2, $3, $4, $5)
+               (contract_id, action_type, old_value, new_value, changed_by, previous_hash, hash, signature)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          RETURNING id",
     )
     .bind(contract_id)
@@ -388,8 +486,12 @@ pub async fn log_contract_change(
     .bind(&old_value)
     .bind(&new_value)
     .bind(changed_by)
+    .bind(&prev_hash)
+    .bind(&new_hash)
+    .bind(&dummy_signature)
     .fetch_one(&mut *tx)
     .await?;
+
 
     // If we have a new_value, persist a snapshot
     if let Some(ref snap_data) = new_value {

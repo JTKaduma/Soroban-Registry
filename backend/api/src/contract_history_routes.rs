@@ -43,4 +43,9 @@ pub fn contract_history_routes() -> Router<AppState> {
             "/api/contracts/:id/rollback/:snapshot_id",
             post(contract_history_handlers::rollback_contract),
         )
+        // Verify entire audit log hash-chain
+        .route(
+            "/api/contracts/:id/history/verify",
+            get(contract_history_handlers::verify_contract_history),
+        )
 }

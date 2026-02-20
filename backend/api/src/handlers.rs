@@ -1,6 +1,7 @@
 ﻿pub mod migrations;
 
 use crate::trust::{compute_trust_score, TrustInput};
+use crate::validation::{ValidatedJson, Validatable};
 
 use axum::{
     extract::{
@@ -278,11 +279,18 @@ pub async fn get_contract_versions(
 }
 
 /// Publish a new contract
+///
+/// This endpoint validates and sanitizes all input data automatically:
+/// - contract_id: must be a valid Stellar contract ID (56 chars starting with 'C')
+/// - name: required, 1-255 characters, HTML stripped
+/// - publisher_address: must be a valid Stellar address (56 chars starting with 'G')
+/// - source_url: if provided, must be a valid URL
+/// - tags: max 10 tags, each max 50 characters
 pub async fn publish_contract(
     State(state): State<AppState>,
-    payload: Result<Json<PublishRequest>, JsonRejection>,
+    ValidatedJson(req): ValidatedJson<PublishRequest>,
 ) -> ApiResult<Json<Contract>> {
-    let Json(req) = payload.map_err(map_json_rejection)?;
+    // req is already validated and sanitized by ValidatedJson extractor
 
     // First, ensure publisher exists or create one
     let publisher: Publisher = sqlx::query_as(

@@ -109,17 +109,7 @@ pub struct ContractStats {
     pub last_interaction: Option<DateTime<Utc>>,
 }
 
-/// Contract dependency relationship
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct ContractDependency {
-    pub id: Uuid,
-    pub contract_id: Uuid,
-    pub depends_on_id: Uuid,
-    pub dependency_type: String,
-    pub created_at: DateTime<Utc>,
-}
-
-/// Graph node (minimal contract info for graph rendering)
+/// GraphNode (minimal contract info for graph rendering)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GraphNode {
     pub id: Uuid,
@@ -211,6 +201,30 @@ pub struct ContractSearchParams {
     pub page: Option<i64>,
     #[serde(alias = "page_size")]
     pub limit: Option<i64>,
+}
+
+// Add to shared/src/lib.rs after ContractSearchParams
+
+/// Pagination params for contract versions (limit/offset style)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VersionPaginationParams {
+    #[serde(default = "default_version_limit")]
+    pub limit: i64,
+    #[serde(default)]
+    pub offset: i64,
+}
+
+fn default_version_limit() -> i64 {
+    20
+}
+
+/// Paginated version response (limit/offset style per issue #32 spec)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PaginatedVersionResponse {
+    pub items: Vec<ContractVersion>,
+    pub total: i64,
+    pub limit: i64,
+    pub offset: i64,
 }
 
 /// Paginated response
@@ -838,6 +852,9 @@ pub struct ContractAuditLog {
     pub new_value:   Option<serde_json::Value>,
     pub changed_by:  String,
     pub timestamp:   DateTime<Utc>,
+    pub previous_hash: Option<String>,
+    pub hash:        Option<String>,
+    pub signature:   Option<String>,
 }
 
 /// Full contract state captured at each audited change in `contract_snapshots`.
@@ -881,19 +898,83 @@ pub struct RollbackRequest {
 }
 
 /// Paginated response for audit log
+// TODO: Implement missing types: DeployProposal, MultisigPolicy, ProposalSignature
+// #[derive(Debug, Clone, Serialize, Deserialize)]
+// pub struct ProposalWithSignatures {
+//     pub proposal: DeployProposal,
+//     pub policy: MultisigPolicy,
+//     pub signatures: Vec<ProposalSignature>,
+//     /// How many more signatures are needed to reach the threshold
+//     pub signatures_needed: i32,
+// }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProposalWithSignatures {
-    pub proposal: DeployProposal,
-    pub policy: MultisigPolicy,
-    pub signatures: Vec<ProposalSignature>,
-    /// How many more signatures are needed to reach the threshold
-    pub signatures_needed: i32,
-}
 pub struct AuditLogPage {
     pub items:       Vec<ContractAuditLog>,
     pub total:       i64,
     pub page:        i64,
     pub total_pages: i64,
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Config Management types
+// ════════════════════════════════════════════════════════════════════════════
+
+/// Represents a contract configuration version in the registry
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct ContractConfig {
+    pub id: Uuid,
+    pub contract_id: Uuid,
+    pub environment: String,
+    pub version: i32,
+    pub config_data: serde_json::Value,
+    pub secrets_data: Option<serde_json::Value>,
+    pub created_at: DateTime<Utc>,
+    pub created_by: String,
+}
+
+/// Request to create a new configuration version
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigCreateRequest {
+    pub environment: String,
+    pub config_data: serde_json::Value,
+    pub secrets_data: Option<serde_json::Value>,
+    pub created_by: String,
+}
+
+/// Request to rollback to an old configuration version
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigRollbackRequest {
+    pub roll_back_to_version: i32,
+    pub created_by: String,
+}
+
+/// Response object for returning configurations (without secrets_data when returning publicly)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContractConfigResponse {
+    pub id: Uuid,
+    pub contract_id: Uuid,
+    pub environment: String,
+    pub version: i32,
+    pub config_data: serde_json::Value,
+    pub has_secrets: bool, // Indicator instead of returning actual secrets
+    pub created_at: DateTime<Utc>,
+    pub created_by: String,
+}
+
+impl From<ContractConfig> for ContractConfigResponse {
+    fn from(config: ContractConfig) -> Self {
+        Self {
+            id: config.id,
+            contract_id: config.contract_id,
+            environment: config.environment,
+            version: config.version,
+            config_data: config.config_data,
+            has_secrets: config.secrets_data.is_some(),
+            created_at: config.created_at,
+            created_by: config.created_by,
+        }
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
