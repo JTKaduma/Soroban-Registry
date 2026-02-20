@@ -1,5 +1,5 @@
 import { Suspense } from 'react';
-import { Package } from 'lucide-react';
+import { Package, GitBranch } from 'lucide-react';
 import { ContractsContent } from './contracts-content';
 
 export const dynamic = 'force-dynamic';
@@ -23,6 +23,13 @@ export default function ContractsPage() {
                 className="text-blue-600 dark:text-blue-400 font-medium"
               >
                 Browse
+              </a>
+              <a
+                href="/graph"
+                className="flex items-center gap-1.5 text-gray-600 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+              >
+                <GitBranch className="w-4 h-4" />
+                Graph
               </a>
               <a
                 href="/publish"

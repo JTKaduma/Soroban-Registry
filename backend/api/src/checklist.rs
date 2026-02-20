@@ -1,7 +1,7 @@
 // api/src/checklist.rs
 // 50+ security audit checklist items for Soroban smart contracts
 
-use shared::models::{CheckCategory, ChecklistItem, DetectionMethod, Severity};
+use crate::models::{CheckCategory, ChecklistItem, DetectionMethod, Severity};
 
 /// Returns the full static checklist of 50+ security audit items
 pub fn all_checks() -> Vec<ChecklistItem> {

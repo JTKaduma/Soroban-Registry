@@ -223,7 +223,13 @@ pub async fn rate_limit_middleware(
     if !decision.allowed {
         let mut response = (
             StatusCode::TOO_MANY_REQUESTS,
-            Json(json!({ "error": "rate limit exceeded" })),
+            Json(json!({
+                "error": "RateLimitExceeded",
+                "message": "Too many requests. Please retry after the indicated time.",
+                "code": 429,
+                "timestamp": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+                "correlation_id": uuid::Uuid::new_v4().to_string()
+            })),
         )
             .into_response();
         attach_rate_limit_headers(&mut response, &decision);

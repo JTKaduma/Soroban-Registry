@@ -43,6 +43,44 @@ soroban-registry/
 - **PostgreSQL** 16+ ([Install](https://www.postgresql.org/download/))
 - **Docker** (optional, for containerized setup)
 
+### Database Seeding
+
+Populate your development database with realistic test data:
+
+```bash
+# Seed with 50 contracts (default)
+cargo run --bin seeder -- --count=50
+
+# Seed with 100 contracts
+cargo run --bin seeder -- --count=100
+
+# Use a specific seed for reproducible data
+cargo run --bin seeder -- --count=50 --seed=12345
+
+# Use custom data file
+cargo run --bin seeder -- --count=50 --data-file=./custom-data.json
+
+# Specify database URL
+cargo run --bin seeder -- --count=50 --database-url=postgresql://user:pass@localhost/dbname
+```
+
+**Features:**
+- creates realistic contracts with names, descriptions, tags, and categories
+- generates publishers with Stellar addresses
+- creates contract versions and verification records
+- Distributes contracts across all networks (mainnet, testnet, futurenet)
+- safe to run multiple times
+- fast - creates 100 contracts in <5 seconds
+- reproducible with `--seed` flag
+
+**Custom Data Format:**
+```json
+{
+  "contract_names": ["CustomContract1", "CustomContract2"],
+  "publisher_names": ["CustomPublisher1", "CustomPublisher2"]
+}
+```
+
 ### Option 1: Docker Compose (Recommended)
 
 ```bash

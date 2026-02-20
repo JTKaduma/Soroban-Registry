@@ -26,8 +26,8 @@ pub async fn run(_api_url: &str) -> Result<()> {
 
     let signer = prompt_with_validation(
         "Enter signer address or secret (starts with G… or S…)",
-        None,
-        |s| {
+        None::<String>,
+        |s: &str| {
             let s = s.trim();
             (s.starts_with('G') || s.starts_with('S')) && s.len() >= 56
         },
@@ -36,8 +36,8 @@ pub async fn run(_api_url: &str) -> Result<()> {
 
     let wasm_path = prompt_with_validation(
         "Path to contract WASM (.wasm)",
-        None,
-        |s| {
+        None::<String>,
+        |s: &str| {
             let p = Path::new(s.trim());
             p.exists() && p.is_file() && p.extension().map(|e| e == "wasm").unwrap_or(false)
         },
@@ -326,16 +326,17 @@ fn prompt_with_validation<F>(
     default: Option<String>,
     validate: F,
     error_msg: &str,
-) -> Result<String>
-where
-    F: Fn(&str) -> bool,
+) -> Result<String> 
+where 
+    F: FnMut(&str) -> bool 
 {
     loop {
         let value = prompt(label, default.clone())?;
         if validate(&value) {
             return Ok(value);
         }
-        println!("{}", error_msg.red());
+
+        println!("{}", format!("Error: {}", error_msg).red());
     }
 }
 

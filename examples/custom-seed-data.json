@@ -1,0 +1,16 @@
+{
+  "contract_names": [
+    "AdvancedTokenSwap",
+    "LiquidityAggregator",
+    "PriceFeedOracle",
+    "YieldOptimizer",
+    "GovernancePlatform"
+  ],
+  "publisher_names": [
+    "Stellar Foundation",
+    "Soroban Core Team",
+    "DeFi Alliance",
+    "Crypto Research Lab",
+    "Blockchain Innovations"
+  ]
+}

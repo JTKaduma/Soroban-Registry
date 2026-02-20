@@ -41,7 +41,19 @@ impl ApiError {
     }
 
     pub fn internal(message: impl Into<String>) -> Self {
-        Self::new(StatusCode::INTERNAL_SERVER_ERROR, "InternalServerError", message)
+        Self::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "InternalServerError",
+            message,
+        )
+    }
+
+    pub fn unprocessable(error: impl Into<String>, message: impl Into<String>) -> Self {
+        Self::new(StatusCode::UNPROCESSABLE_ENTITY, error, message)
+    }
+
+    pub fn db_error(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::INTERNAL_SERVER_ERROR, "DatabaseError", message)
     }
 }
 
@@ -58,7 +70,9 @@ impl IntoResponse for ApiError {
 
         let mut response = (self.status, Json(payload)).into_response();
         if let Ok(value) = HeaderValue::from_str(&correlation_id) {
-            response.headers_mut().insert(header::HeaderName::from_static("x-correlation-id"), value);
+            response
+                .headers_mut()
+                .insert(header::HeaderName::from_static("x-correlation-id"), value);
         }
         response
     }

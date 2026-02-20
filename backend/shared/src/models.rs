@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use uuid::Uuid;
@@ -27,6 +28,7 @@ pub struct Contract {
 /// Network where the contract is deployed
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "network_type", rename_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
 pub enum Network {
     Mainnet,
     Testnet,
@@ -101,6 +103,33 @@ pub struct ContractStats {
     pub last_interaction: Option<DateTime<Utc>>,
 }
 
+/// GraphNode (minimal contract info for graph rendering)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphNode {
+    pub id: Uuid,
+    pub contract_id: String,
+    pub name: String,
+    pub network: Network,
+    pub is_verified: bool,
+    pub category: Option<String>,
+    pub tags: Vec<String>,
+}
+
+/// Graph edge (dependency relationship)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphEdge {
+    pub source: Uuid,
+    pub target: Uuid,
+    pub dependency_type: String,
+}
+
+/// Full graph response
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphResponse {
+    pub nodes: Vec<GraphNode>,
+    pub edges: Vec<GraphEdge>,
+}
+
 /// Request to publish a new contract
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PublishRequest {
@@ -112,6 +141,37 @@ pub struct PublishRequest {
     pub tags: Vec<String>,
     pub source_url: Option<String>,
     pub publisher_address: String,
+    // Dependencies (new field)
+    #[serde(default)]
+    pub dependencies: Vec<DependencyDeclaration>,
+}
+
+/// Dependency declaration in publish request
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DependencyDeclaration {
+    pub name: String,
+    pub version_constraint: String,
+}
+
+/// Contract dependency record (database row)
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct ContractDependency {
+    pub id: Uuid,
+    pub contract_id: Uuid,
+    pub dependency_name: String,
+    pub dependency_contract_id: Option<Uuid>,
+    pub version_constraint: String,
+    pub created_at: DateTime<Utc>,
+}
+
+/// Recursive dependency tree node for API response
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DependencyTreeNode {
+    pub contract_id: String, // Public key ID
+    pub name: String,
+    pub current_version: String,
+    pub constraint_to_parent: String,
+    pub dependencies: Vec<DependencyTreeNode>,
 }
 
 /// Request to verify a contract
@@ -134,6 +194,30 @@ pub struct ContractSearchParams {
     pub page: Option<i64>,
     #[serde(alias = "page_size")]
     pub limit: Option<i64>,
+}
+
+// Add to shared/src/lib.rs after ContractSearchParams
+
+/// Pagination params for contract versions (limit/offset style)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VersionPaginationParams {
+    #[serde(default = "default_version_limit")]
+    pub limit: i64,
+    #[serde(default)]
+    pub offset: i64,
+}
+
+fn default_version_limit() -> i64 {
+    20
+}
+
+/// Paginated version response (limit/offset style per issue #32 spec)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PaginatedVersionResponse {
+    pub items: Vec<ContractVersion>,
+    pub total: i64,
+    pub limit: i64,
+    pub offset: i64,
 }
 
 /// Paginated response
@@ -192,13 +276,28 @@ pub struct CreateMigrationRequest {
     pub wasm_hash: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type)]
+/// Request to update a migration's status
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateMigrationStatusRequest {
+    pub status: MigrationStatus,
+    pub log_output: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type, PartialEq)]
 #[sqlx(type_name = "deployment_environment", rename_all = "lowercase")]
 pub enum DeploymentEnvironment {
     Blue,
     Green,
 }
 
+impl std::fmt::Display for DeploymentEnvironment {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DeploymentEnvironment::Blue => write!(f, "blue"),
+            DeploymentEnvironment::Green => write!(f, "green"),
+        }
+    }
+}
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type, PartialEq)]
 #[sqlx(type_name = "deployment_status", rename_all = "lowercase")]
 pub enum DeploymentStatus {
@@ -232,6 +331,327 @@ pub struct DeploymentSwitch {
     pub switched_at: DateTime<Utc>,
     pub switched_by: Option<String>,
     pub rollback: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(type_name = "canary_status", rename_all = "snake_case")]
+pub enum CanaryStatus {
+    Pending,
+    Active,
+    Paused,
+    Completed,
+    RolledBack,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(type_name = "rollout_stage", rename_all = "snake_case")]
+pub enum RolloutStage {
+    Stage1,
+    Stage2,
+    Stage3,
+    Stage4,
+    Complete,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct CanaryRelease {
+    pub id: Uuid,
+    pub contract_id: Uuid,
+    pub from_deployment_id: Option<Uuid>,
+    pub to_deployment_id: Uuid,
+    pub status: CanaryStatus,
+    pub current_stage: RolloutStage,
+    pub current_percentage: i32,
+    pub target_percentage: i32,
+    pub error_rate_threshold: Decimal,
+    pub current_error_rate: Option<Decimal>,
+    pub total_requests: i32,
+    pub error_count: i32,
+    pub started_at: DateTime<Utc>,
+    pub completed_at: Option<DateTime<Utc>>,
+    pub created_by: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct CanaryMetric {
+    pub id: Uuid,
+    pub canary_id: Uuid,
+    pub timestamp: DateTime<Utc>,
+    pub requests: i32,
+    pub errors: i32,
+    pub error_rate: rust_decimal::Decimal,
+    pub avg_response_time_ms: Option<Decimal>,
+    pub p95_response_time_ms: Option<Decimal>,
+    pub p99_response_time_ms: Option<Decimal>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct CanaryUserAssignment {
+    pub id: Uuid,
+    pub canary_id: Uuid,
+    pub user_address: String,
+    pub assigned_at: DateTime<Utc>,
+    pub notified: bool,
+    pub notified_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateCanaryRequest {
+    pub contract_id: String,
+    pub to_deployment_id: String,
+    pub error_rate_threshold: Option<f64>,
+    pub created_by: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdvanceCanaryRequest {
+    pub canary_id: String,
+    pub target_percentage: Option<i32>,
+    pub advanced_by: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecordCanaryMetricRequest {
+    pub canary_id: String,
+    pub requests: i32,
+    pub errors: i32,
+    pub avg_response_time_ms: Option<f64>,
+    pub p95_response_time_ms: Option<f64>,
+    pub p99_response_time_ms: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(type_name = "ab_test_status", rename_all = "snake_case")]
+pub enum AbTestStatus {
+    Draft,
+    Running,
+    Paused,
+    Completed,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(type_name = "variant_type", rename_all = "snake_case")]
+pub enum VariantType {
+    Control,
+    Treatment,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct AbTest {
+    pub id: Uuid,
+    pub contract_id: Uuid,
+    pub name: String,
+    pub description: Option<String>,
+    pub status: AbTestStatus,
+    pub traffic_split: Decimal,
+    pub variant_a_deployment_id: Uuid,
+    pub variant_b_deployment_id: Uuid,
+    pub primary_metric: String,
+    pub hypothesis: Option<String>,
+    pub significance_threshold: Decimal,
+    pub min_sample_size: i32,
+    pub started_at: Option<DateTime<Utc>>,
+    pub ended_at: Option<DateTime<Utc>>,
+    pub created_by: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct AbTestVariant {
+    pub id: Uuid,
+    pub test_id: Uuid,
+    pub variant_type: VariantType,
+    pub deployment_id: Uuid,
+    pub traffic_percentage: Decimal,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct AbTestAssignment {
+    pub id: Uuid,
+    pub test_id: Uuid,
+    pub user_address: String,
+    pub variant_type: VariantType,
+    pub assigned_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct AbTestMetric {
+    pub id: Uuid,
+    pub test_id: Uuid,
+    pub variant_type: VariantType,
+    pub metric_name: String,
+    pub metric_value: Decimal,
+    pub user_address: Option<String>,
+    pub timestamp: DateTime<Utc>,
+    pub metadata: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct AbTestResult {
+    pub id: Uuid,
+    pub test_id: Uuid,
+    pub variant_type: VariantType,
+    pub sample_size: i32,
+    pub mean_value: Option<Decimal>,
+    pub std_deviation: Option<Decimal>,
+    pub confidence_interval_lower: Option<Decimal>,
+    pub confidence_interval_upper: Option<Decimal>,
+    pub p_value: Option<Decimal>,
+    pub statistical_significance: Option<Decimal>,
+    pub is_winner: bool,
+    pub calculated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateAbTestRequest {
+    pub contract_id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub traffic_split: Option<f64>,
+    pub variant_a_deployment_id: String,
+    pub variant_b_deployment_id: String,
+    pub primary_metric: String,
+    pub hypothesis: Option<String>,
+    pub significance_threshold: Option<f64>,
+    pub min_sample_size: Option<i32>,
+    pub created_by: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecordAbTestMetricRequest {
+    pub test_id: String,
+    pub user_address: Option<String>,
+    pub metric_name: String,
+    pub metric_value: f64,
+    pub metadata: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GetVariantRequest {
+    pub test_id: String,
+    pub user_address: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(type_name = "metric_type", rename_all = "snake_case")]
+pub enum MetricType {
+    ExecutionTime,
+    MemoryUsage,
+    StorageIo,
+    GasConsumption,
+    ErrorRate,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(type_name = "alert_severity", rename_all = "lowercase")]
+pub enum AlertSeverity {
+    Info,
+    Warning,
+    Critical,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct PerformanceMetric {
+    pub id: Uuid,
+    pub contract_id: Uuid,
+    pub metric_type: MetricType,
+    pub function_name: Option<String>,
+    pub value: Decimal,
+    pub p50: Option<Decimal>,
+    pub p95: Option<Decimal>,
+    pub p99: Option<Decimal>,
+    pub timestamp: DateTime<Utc>,
+    pub metadata: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct PerformanceAnomaly {
+    pub id: Uuid,
+    pub contract_id: Uuid,
+    pub metric_type: MetricType,
+    pub function_name: Option<String>,
+    pub detected_at: DateTime<Utc>,
+    pub baseline_value: Option<Decimal>,
+    pub current_value: Option<Decimal>,
+    pub deviation_percent: Option<Decimal>,
+    pub severity: AlertSeverity,
+    pub resolved: bool,
+    pub resolved_at: Option<DateTime<Utc>>,
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct PerformanceAlert {
+    pub id: Uuid,
+    pub contract_id: Uuid,
+    pub metric_type: MetricType,
+    pub threshold_type: String,
+    pub threshold_value: Decimal,
+    pub current_value: Decimal,
+    pub severity: AlertSeverity,
+    pub triggered_at: DateTime<Utc>,
+    pub acknowledged: bool,
+    pub acknowledged_at: Option<DateTime<Utc>>,
+    pub acknowledged_by: Option<String>,
+    pub resolved: bool,
+    pub resolved_at: Option<DateTime<Utc>>,
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct PerformanceTrend {
+    pub id: Uuid,
+    pub contract_id: Uuid,
+    pub function_name: Option<String>,
+    pub metric_type: MetricType,
+    pub timeframe_start: DateTime<Utc>,
+    pub timeframe_end: DateTime<Utc>,
+    pub avg_value: Option<Decimal>,
+    pub min_value: Option<Decimal>,
+    pub max_value: Option<Decimal>,
+    pub p50_value: Option<Decimal>,
+    pub p95_value: Option<Decimal>,
+    pub p99_value: Option<Decimal>,
+    pub sample_count: i32,
+    pub trend_direction: Option<String>,
+    pub change_percent: Option<Decimal>,
+    pub calculated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct PerformanceAlertConfig {
+    pub id: Uuid,
+    pub contract_id: Uuid,
+    pub metric_type: MetricType,
+    pub threshold_type: String,
+    pub threshold_value: Decimal,
+    pub severity: AlertSeverity,
+    pub enabled: bool,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecordPerformanceMetricRequest {
+    pub contract_id: String,
+    pub metric_type: MetricType,
+    pub function_name: Option<String>,
+    pub value: f64,
+    pub p50: Option<f64>,
+    pub p95: Option<f64>,
+    pub p99: Option<f64>,
+    pub metadata: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateAlertConfigRequest {
+    pub contract_id: String,
+    pub metric_type: MetricType,
+    pub threshold_type: String,
+    pub threshold_value: f64,
+    pub severity: Option<AlertSeverity>,
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -352,124 +772,282 @@ pub struct HealthCheckRequest {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// MULTI-SIGNATURE DEPLOYMENT TYPES  (issue #47)
+// POPULARITY / TRENDING
 // ═══════════════════════════════════════════════════════════════════════════
 
-/// Lifecycle of a multi-sig deployment proposal
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, sqlx::Type)]
-#[sqlx(type_name = "proposal_status", rename_all = "lowercase")]
-pub enum ProposalStatus {
-    Pending,
-    Approved,
-    Executed,
-    Expired,
-    Rejected,
+/// Query parameters for the trending contracts endpoint
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrendingParams {
+    /// Max results to return (default 10, max 50)
+    pub limit: Option<i64>,
+    /// Timeframe for trending calculation: "7d", "30d", "90d" (default "7d")
+    pub timeframe: Option<String>,
 }
 
-impl std::fmt::Display for ProposalStatus {
+/// Response DTO for a trending contract
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct TrendingContract {
+    // Core contract fields
+    pub id: Uuid,
+    pub contract_id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub network: Network,
+    pub is_verified: bool,
+    pub category: Option<String>,
+    pub tags: Vec<String>,
+    pub created_at: DateTime<Utc>,
+    // Popularity metrics
+    pub popularity_score: f64,
+    pub deployment_count: i64,
+    pub interaction_count: i64,
+}
+
+// MULTI-SIGNATURE DEPLOYMENT TYPES  (issue #47)
+// ═══════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════════
+// Audit Log & Version History types
+// ════════════════════════════════════════════════════════════════════════════
+
+/// The type of mutation that triggered an audit log entry.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, sqlx::Type)]
+#[sqlx(type_name = "audit_action_type", rename_all = "snake_case")]
+pub enum AuditActionType {
+    ContractPublished,
+    MetadataUpdated,
+    VerificationChanged,
+    PublisherChanged,
+    VersionCreated,
+    Rollback,
+}
+
+impl std::fmt::Display for AuditActionType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
-            ProposalStatus::Pending => "pending",
-            ProposalStatus::Approved => "approved",
-            ProposalStatus::Executed => "executed",
-            ProposalStatus::Expired => "expired",
-            ProposalStatus::Rejected => "rejected",
+            Self::ContractPublished  => "contract_published",
+            Self::MetadataUpdated    => "metadata_updated",
+            Self::VerificationChanged => "verification_changed",
+            Self::PublisherChanged   => "publisher_changed",
+            Self::VersionCreated     => "version_created",
+            Self::Rollback           => "rollback",
         };
         write!(f, "{}", s)
     }
 }
 
-/// A multi-sig policy defining signers and required threshold
+/// One immutable row in `contract_audit_log`.
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct MultisigPolicy {
+pub struct ContractAuditLog {
+    pub id:          Uuid,
+    pub contract_id: Uuid,
+    pub action_type: AuditActionType,
+    pub old_value:   Option<serde_json::Value>,
+    pub new_value:   Option<serde_json::Value>,
+    pub changed_by:  String,
+    pub timestamp:   DateTime<Utc>,
+    pub previous_hash: Option<String>,
+    pub hash:        Option<String>,
+    pub signature:   Option<String>,
+}
+
+/// Full contract state captured at each audited change in `contract_snapshots`.
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct ContractSnapshot {
+    pub id:             Uuid,
+    pub contract_id:    Uuid,
+    pub version_number: i32,
+    pub snapshot_data:  serde_json::Value,
+    pub audit_log_id:   Uuid,
+    pub created_at:     DateTime<Utc>,
+}
+
+/// A single field-level change between two snapshots.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FieldChange {
+    pub field: String,
+    pub from:  serde_json::Value,
+    pub to:    serde_json::Value,
+}
+
+/// Response for GET /api/contracts/:id/versions/:v1/diff/:v2
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VersionDiff {
+    pub contract_id:  Uuid,
+    pub from_version: i32,
+    pub to_version:   i32,
+    /// Fields present in v2 but not v1
+    pub added:        Vec<FieldChange>,
+    /// Fields present in v1 but not v2
+    pub removed:      Vec<FieldChange>,
+    /// Fields present in both but with different values
+    pub modified:     Vec<FieldChange>,
+}
+
+/// Request body for POST /api/contracts/:id/rollback/:snapshot_id
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RollbackRequest {
+    /// Stellar address (or admin service ID) authorising the rollback
+    pub changed_by: String,
+}
+
+/// Paginated response for audit log
+// TODO: Implement missing types: DeployProposal, MultisigPolicy, ProposalSignature
+// #[derive(Debug, Clone, Serialize, Deserialize)]
+// pub struct ProposalWithSignatures {
+//     pub proposal: DeployProposal,
+//     pub policy: MultisigPolicy,
+//     pub signatures: Vec<ProposalSignature>,
+//     /// How many more signatures are needed to reach the threshold
+//     pub signatures_needed: i32,
+// }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuditLogPage {
+    pub items:       Vec<ContractAuditLog>,
+    pub total:       i64,
+    pub page:        i64,
+    pub total_pages: i64,
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Config Management types
+// ════════════════════════════════════════════════════════════════════════════
+
+/// Represents a contract configuration version in the registry
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct ContractConfig {
     pub id: Uuid,
-    pub name: String,
-    /// Minimum number of signatures required (M in M-of-N)
-    pub threshold: i32,
-    /// Stellar addresses authorised to sign proposals using this policy
-    pub signer_addresses: Vec<String>,
-    /// How long (seconds) a proposal under this policy stays valid
-    pub expiry_seconds: i32,
-    pub created_by: String,
+    pub contract_id: Uuid,
+    pub environment: String,
+    pub version: i32,
+    pub config_data: serde_json::Value,
+    pub secrets_data: Option<serde_json::Value>,
     pub created_at: DateTime<Utc>,
-}
-
-/// A pending (or resolved) deployment proposal
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct DeployProposal {
-    pub id: Uuid,
-    pub contract_name: String,
-    pub contract_id: String,
-    pub wasm_hash: String,
-    pub network: Network,
-    pub description: Option<String>,
-    pub policy_id: Uuid,
-    pub status: ProposalStatus,
-    pub expires_at: DateTime<Utc>,
-    pub executed_at: Option<DateTime<Utc>>,
-    pub proposer: String,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-}
-
-/// A single signature on a deployment proposal
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct ProposalSignature {
-    pub id: Uuid,
-    pub proposal_id: Uuid,
-    pub signer_address: String,
-    pub signature_data: Option<String>,
-    pub signed_at: DateTime<Utc>,
-}
-
-// ── Request / Response DTOs ───────────────────────────────────────────────
-
-/// POST /api/multisig/policies
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CreatePolicyRequest {
-    pub name: String,
-    /// M-of-N threshold (must be ≥ 1 and ≤ number of signers)
-    pub threshold: i32,
-    /// Comma-separated list acceptable; server always stores as Vec<String>
-    pub signer_addresses: Vec<String>,
-    /// Seconds until unsigned proposals expire (default: 86400 = 24 h)
-    pub expiry_seconds: Option<i32>,
     pub created_by: String,
 }
 
-/// POST /api/contracts/deploy-proposal
+/// Request to create a new configuration version
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CreateProposalRequest {
-    pub contract_name: String,
-    pub contract_id: String,
-    pub wasm_hash: String,
-    pub network: Network,
-    pub description: Option<String>,
-    pub policy_id: Uuid,
-    pub proposer: String,
+pub struct ConfigCreateRequest {
+    pub environment: String,
+    pub config_data: serde_json::Value,
+    pub secrets_data: Option<serde_json::Value>,
+    pub created_by: String,
 }
 
-/// POST /api/contracts/{id}/sign
+/// Request to rollback to an old configuration version
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SignProposalRequest {
-    pub signer_address: String,
-    /// Optional raw signature bytes (hex-encoded) for off-chain validation
-    pub signature_data: Option<String>,
+pub struct ConfigRollbackRequest {
+    pub roll_back_to_version: i32,
+    pub created_by: String,
 }
 
-/// Rich response combining a proposal with its signatures and policy
+/// Response object for returning configurations (without secrets_data when returning publicly)
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProposalWithSignatures {
-    pub proposal: DeployProposal,
-    pub policy: MultisigPolicy,
-    pub signatures: Vec<ProposalSignature>,
-    /// How many more signatures are needed to reach the threshold
-    pub signatures_needed: i32,
+pub struct ContractConfigResponse {
+    pub id: Uuid,
+    pub contract_id: Uuid,
+    pub environment: String,
+    pub version: i32,
+    pub config_data: serde_json::Value,
+    pub has_secrets: bool, // Indicator instead of returning actual secrets
+    pub created_at: DateTime<Utc>,
+    pub created_by: String,
 }
+
+impl From<ContractConfig> for ContractConfigResponse {
+    fn from(config: ContractConfig) -> Self {
+        Self {
+            id: config.id,
+            contract_id: config.contract_id,
+            environment: config.environment,
+            version: config.version,
+            config_data: config.config_data,
+            has_secrets: config.secrets_data.is_some(),
+            created_at: config.created_at,
+            created_by: config.created_by,
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DATA RESIDENCY CONTROLS  (issue #100)
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(type_name = "residency_decision", rename_all = "lowercase")]
+pub enum ResidencyDecision {
+    Allowed,
+    Denied,
+}
+
+impl std::fmt::Display for ResidencyDecision {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Allowed => write!(f, "allowed"),
+            Self::Denied  => write!(f, "denied"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct ResidencyPolicy {
+    pub id:              Uuid,
+    pub contract_id:     String,
+    pub allowed_regions: Vec<String>,
+    pub description:     Option<String>,
+    pub is_active:       bool,
+    pub created_by:      String,
+    pub created_at:      DateTime<Utc>,
+    pub updated_at:      DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct ResidencyAuditLog {
+    pub id:               Uuid,
+    pub policy_id:        Uuid,
+    pub contract_id:      String,
+    pub requested_region: String,
+    pub decision:         ResidencyDecision,
+    pub action:           String,
+    pub requested_by:     Option<String>,
+    pub reason:           Option<String>,
+    pub created_at:       DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct ResidencyViolation {
+    pub id:               Uuid,
+    pub policy_id:        Uuid,
+    pub contract_id:      String,
+    pub attempted_region: String,
+    pub action:           String,
+    pub attempted_by:     Option<String>,
+    pub prevented_at:     DateTime<Utc>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UpdateMigrationStatusRequest {
-    pub status: MigrationStatus,
-    pub log_output: Option<String>,
+pub struct CreateResidencyPolicyRequest {
+    pub contract_id:     String,
+    pub allowed_regions: Vec<String>,
+    pub description:     Option<String>,
+    pub created_by:      String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateResidencyPolicyRequest {
+    pub allowed_regions: Option<Vec<String>>,
+    pub description:     Option<String>,
+    pub is_active:       Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CheckResidencyRequest {
+    pub policy_id:        Uuid,
+    pub contract_id:      String,
+    pub requested_region: String,
+    pub action:           String,
+    pub requested_by:     Option<String>,
 }
 
 impl std::fmt::Display for DeploymentEnvironment {
@@ -479,6 +1057,11 @@ impl std::fmt::Display for DeploymentEnvironment {
             DeploymentEnvironment::Green => write!(f, "green"),
         }
     }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ListResidencyLogsParams {
+    pub contract_id: Option<String>,
+    pub limit:       Option<i64>,
+    pub page:        Option<i64>,
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

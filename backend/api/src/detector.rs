@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 use crate::checklist::all_checks;
-use shared::models::{CheckStatus, DetectionMethod};
+use crate::models::{CheckStatus, DetectionMethod};
 
 /// Result of running the detector on a single check
 #[derive(Debug)]
@@ -26,7 +26,7 @@ pub fn detect_all(source: &str) -> HashMap<String, DetectionResult> {
             DetectionMethod::Manual => continue,
         };
 
-        let result = match check.id.as_str() {
+        let result = match check.id {
             "IV-001" => detect_unwrap(&lines),
             "IV-002" => detect_expect(&lines),
             "IV-006" => detect_panic_macro(&lines),
@@ -52,7 +52,7 @@ pub fn detect_all(source: &str) -> HashMap<String, DetectionResult> {
             _        => detect_generic(&lines, &patterns),
         };
 
-        results.insert(check.id, result);
+        results.insert(check.id.to_string(), result);
     }
 
     results

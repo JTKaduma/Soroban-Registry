@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 use crate::checklist::all_checks;
-use shared::models::{AuditCheckRow, CategoryScore, CheckStatus, ChecklistItem, DetectionMethod, Severity};
+use crate::models::{AuditCheckRow, CategoryScore, CheckStatus, ChecklistItem, DetectionMethod, Severity};
 
 pub fn severity_weight(sev: &Severity) -> f64 {
     match sev {
@@ -28,7 +28,7 @@ fn score_category(
 
     for item in checks {
         let status = statuses
-            .get(item.id.as_str())
+            .get(item.id)
             .map(|r| &r.status)
             .unwrap_or(&CheckStatus::Pending);
 
@@ -79,7 +79,7 @@ pub fn calculate_scores(check_rows: &[AuditCheckRow]) -> (f64, Vec<CategoryScore
             score_category(items, &status_map);
 
         for item in items {
-            let s = status_map.get(item.id.as_str()).map(|r| &r.status).unwrap_or(&CheckStatus::Pending);
+            let s = status_map.get(item.id).map(|r| &r.status).unwrap_or(&CheckStatus::Pending);
             if *s == CheckStatus::NotApplicable { continue; }
             let w = severity_weight(&item.severity);
             total_weighted_total += w;
@@ -130,7 +130,7 @@ pub fn build_markdown_report(
 ) -> String {
     let all = all_checks();
     // index by id as &str for lookup
-    let meta: HashMap<&str, &ChecklistItem> = all.iter().map(|c| (c.id.as_str(), c)).collect();
+    let meta: HashMap<&str, &ChecklistItem> = all.iter().map(|c| (c.id, c)).collect();
     let status_map: HashMap<&str, &AuditCheckRow> =
         check_rows.iter().map(|r| (r.check_id.as_str(), r)).collect();
 
@@ -174,7 +174,7 @@ pub fn build_markdown_report(
             .iter()
             .filter(|item| item.severity == severity)
             .filter_map(|item| {
-                let row = status_map.get(item.id.as_str())?;
+                let row = status_map.get(item.id)?;
                 if failures_only && row.status == CheckStatus::Passed { return None; }
                 Some((item, *row))
             })

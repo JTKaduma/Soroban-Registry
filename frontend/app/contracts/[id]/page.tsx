@@ -1,20 +1,38 @@
-'use client';
+"use client";
 
-import { Suspense } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { api } from '@/lib/api';
-import ExampleGallery from '@/components/ExampleGallery';
-import { ArrowLeft, CheckCircle2, Clock, Globe, Github, Tag } from 'lucide-react';
-import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { Suspense } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "@/lib/api";
+import ExampleGallery from "@/components/ExampleGallery";
+import DependencyGraph from "@/components/DependencyGraph";
+import {
+  ArrowLeft,
+  CheckCircle2,
+  Clock,
+  Globe,
+  Github,
+  Tag,
+} from "lucide-react";
+import Link from "next/link";
+import { useParams } from "next/navigation";
 
 function ContractDetailsContent() {
   const params = useParams();
   const id = params.id as string;
 
-  const { data: contract, isLoading, error } = useQuery({
-    queryKey: ['contract', id],
+  const {
+    data: contract,
+    isLoading,
+    error,
+  } = useQuery({
+    queryKey: ["contract", id],
     queryFn: () => api.getContract(id),
+  });
+
+  const { data: dependencies, isLoading: depsLoading } = useQuery({
+    queryKey: ["contract-dependencies", id],
+    queryFn: () => api.getContractDependencies(id),
+    enabled: !!contract,
   });
 
   if (isLoading) {
@@ -68,7 +86,7 @@ function ContractDetailsContent() {
               )}
             </div>
           </div>
-          
+
           <div className="flex gap-2">
             {/* Publisher actions/links could go here */}
           </div>
@@ -96,6 +114,14 @@ function ContractDetailsContent() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Main Content */}
         <div className="lg:col-span-2 space-y-12">
+          {/* Dependency Graph */}
+          <section>
+            <DependencyGraph
+              dependencies={dependencies || []}
+              isLoading={depsLoading}
+            />
+          </section>
+
           {/* Examples Gallery */}
           <section>
             <ExampleGallery contractId={contract.id} />
@@ -108,11 +134,13 @@ function ContractDetailsContent() {
             <h3 className="font-semibold text-gray-900 dark:text-white mb-4">
               Contract Details
             </h3>
-            
+
             <dl className="space-y-3 text-sm">
               <div>
                 <dt className="text-gray-500 dark:text-gray-400">Network</dt>
-                <dd className="font-medium text-gray-900 dark:text-white capitalize">{contract.network}</dd>
+                <dd className="font-medium text-gray-900 dark:text-white capitalize">
+                  {contract.network}
+                </dd>
               </div>
               <div>
                 <dt className="text-gray-500 dark:text-gray-400">Published</dt>
@@ -121,7 +149,9 @@ function ContractDetailsContent() {
                 </dd>
               </div>
               <div>
-                <dt className="text-gray-500 dark:text-gray-400">Last Updated</dt>
+                <dt className="text-gray-500 dark:text-gray-400">
+                  Last Updated
+                </dt>
                 <dd className="font-medium text-gray-900 dark:text-white">
                   {new Date(contract.updated_at).toLocaleDateString()}
                 </dd>

@@ -245,14 +245,14 @@ pub async fn get_contract(
 pub async fn get_contract_abi(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
+) -> ApiResult<Json<serde_json::Value>> {
     let abi: Option<serde_json::Value> = sqlx::query_scalar("SELECT abi FROM contracts WHERE id = $1")
         .bind(id)
         .fetch_one(&state.db)
         .await
-        .map_err(|_| StatusCode::NOT_FOUND)?;
+        .map_err(|_| ApiError::not_found("ContractNotFound", format!("No contract found with ID: {}", id)))?;
 
-    abi.map(Json).ok_or(StatusCode::NOT_FOUND)
+    abi.map(Json).ok_or_else(|| ApiError::not_found("AbiNotFound", format!("No ABI available for contract: {}", id)))
 }
 
 /// Get contract version history
