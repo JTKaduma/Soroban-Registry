@@ -215,6 +215,13 @@ pub enum Commands {
         #[arg(long, short)]
         verbose: bool,
     },
+
+	     /// Show the trust score and breakdown for a contract
+    TrustScore {
+        /// Contract UUID to score
+        contract_id: String,
+    },
+
 }
 
 /// Sub-commands for the `multisig` group
@@ -393,6 +400,13 @@ async fn main() -> Result<()> {
                 commands::patch_apply(&cli.api_url, &contract_id, &patch_id).await?;
             }
         },
+
+		  Commands::TrustScore { contract_id } => {
+            log::debug!("Command: trust-score | contract_id={}", contract_id);
+            commands::trust_score(&cli.api_url, &contract_id, network).await?;
+        },
+
+        // ── Multi-sig commands (issue #47) ───────────────────────────────────
         Commands::Multisig { action } => match action {
             MultisigCommands::CreatePolicy { name, threshold, signers, expiry_secs, created_by } => {
                 let signer_vec: Vec<String> =

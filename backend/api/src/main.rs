@@ -17,6 +17,7 @@ mod rate_limit;
 mod routes;
 mod scoring;
 mod state;
+mod trust;
 
 use anyhow::Result;
 use axum::http::{header, HeaderValue, Method};

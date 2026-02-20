@@ -545,6 +545,76 @@ pub async fn patch_create(
     Ok(())
 }
 
+/// GET /api/contracts/:id/trust-score
+pub async fn trust_score(api_url: &str, contract_id: &str, network: Network) -> Result<()> {
+    let url = format!("{}/api/contracts/{}/trust-score", api_url, contract_id);
+    log::debug!("GET {}", url);
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(&url)
+        .query(&[("network", network.to_string())])
+        .send()
+        .await
+        .context("Failed to reach registry API")?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        anyhow::bail!("Failed to get trust score ({}): {}", status, body);
+    }
+
+    let data: serde_json::Value = resp.json().await.context("Failed to parse trust score response")?;
+
+    // ── Header ────────────────────────────────────────────────────────────────
+    let name       = data["contract_name"].as_str().unwrap_or("Unknown");
+    let score      = data["score"].as_f64().unwrap_or(0.0);
+    let badge      = data["badge"].as_str().unwrap_or("Bronze");
+    let badge_icon = data["badge_icon"].as_str().unwrap_or("🥉");
+    let summary    = data["summary"].as_str().unwrap_or("");
+
+    println!("\n{}", "─".repeat(56));
+    println!("  Trust Score — {}", name.bold());
+    println!("{}", "─".repeat(56));
+    println!("  Score : {:.0}/100", score);
+    println!("  Badge : {} {}", badge_icon, badge.bold());
+    println!("  {}",  summary);
+    println!("{}", "─".repeat(56));
+
+    // ── Factor breakdown ──────────────────────────────────────────────────────
+    println!("\n  {} Factor Breakdown\n", "📊".bold());
+
+    if let Some(factors) = data["factors"].as_array() {
+        for factor in factors {
+            let fname   = factor["name"].as_str().unwrap_or("");
+            let earned  = factor["points_earned"].as_f64().unwrap_or(0.0);
+            let max     = factor["points_max"].as_f64().unwrap_or(0.0);
+            let explain = factor["explanation"].as_str().unwrap_or("");
+
+            // Mini progress bar (10 chars)
+            let filled = ((earned / max) * 10.0).round() as usize;
+            let filled = filled.min(10);
+            let bar = format!("{}{}", "█".repeat(filled), "░".repeat(10 - filled));
+
+            println!("  {:<28} [{bar}] {:.0}/{:.0}", fname, earned, max);
+            println!("    {}", explain.dimmed());
+        }
+    }
+
+    // ── Weight documentation ──────────────────────────────────────────────────
+    println!("\n  {} Score Weights\n", "⚖️".bold());
+    if let Some(weights) = data["weights"].as_object() {
+        for (k, v) in weights {
+            println!("  {:<22} {:.0} pts max", k, v.as_f64().unwrap_or(0.0));
+        }
+    }
+
+    let computed_at = data["computed_at"].as_str().unwrap_or("");
+    println!("\n  Computed at: {}\n", computed_at.dimmed());
+
+    Ok(())
+}
+
 pub async fn patch_notify(api_url: &str, patch_id: &str) -> Result<()> {
     println!("\n{}", "Identifying vulnerable contracts...".bold().cyan());
 
