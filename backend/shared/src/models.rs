@@ -320,6 +320,8 @@ pub struct TopUser {
 pub struct TimelineEntry {
     pub date: chrono::NaiveDate,
     pub count: i64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeployGreenRequest {
     pub contract_id: String,
@@ -337,4 +339,95 @@ pub struct HealthCheckRequest {
     pub contract_id: String,
     pub environment: DeploymentEnvironment,
     pub passed: bool,
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Audit Log & Version History types
+// ════════════════════════════════════════════════════════════════════════════
+
+/// The type of mutation that triggered an audit log entry.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, sqlx::Type)]
+#[sqlx(type_name = "audit_action_type", rename_all = "snake_case")]
+pub enum AuditActionType {
+    ContractPublished,
+    MetadataUpdated,
+    VerificationChanged,
+    PublisherChanged,
+    VersionCreated,
+    Rollback,
+}
+
+impl std::fmt::Display for AuditActionType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Self::ContractPublished  => "contract_published",
+            Self::MetadataUpdated    => "metadata_updated",
+            Self::VerificationChanged => "verification_changed",
+            Self::PublisherChanged   => "publisher_changed",
+            Self::VersionCreated     => "version_created",
+            Self::Rollback           => "rollback",
+        };
+        write!(f, "{}", s)
+    }
+}
+
+/// One immutable row in `contract_audit_log`.
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct ContractAuditLog {
+    pub id:          Uuid,
+    pub contract_id: Uuid,
+    pub action_type: AuditActionType,
+    pub old_value:   Option<serde_json::Value>,
+    pub new_value:   Option<serde_json::Value>,
+    pub changed_by:  String,
+    pub timestamp:   DateTime<Utc>,
+}
+
+/// Full contract state captured at each audited change in `contract_snapshots`.
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct ContractSnapshot {
+    pub id:             Uuid,
+    pub contract_id:    Uuid,
+    pub version_number: i32,
+    pub snapshot_data:  serde_json::Value,
+    pub audit_log_id:   Uuid,
+    pub created_at:     DateTime<Utc>,
+}
+
+/// A single field-level change between two snapshots.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FieldChange {
+    pub field: String,
+    pub from:  serde_json::Value,
+    pub to:    serde_json::Value,
+}
+
+/// Response for GET /api/contracts/:id/versions/:v1/diff/:v2
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VersionDiff {
+    pub contract_id:  Uuid,
+    pub from_version: i32,
+    pub to_version:   i32,
+    /// Fields present in v2 but not v1
+    pub added:        Vec<FieldChange>,
+    /// Fields present in v1 but not v2
+    pub removed:      Vec<FieldChange>,
+    /// Fields present in both but with different values
+    pub modified:     Vec<FieldChange>,
+}
+
+/// Request body for POST /api/contracts/:id/rollback/:snapshot_id
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RollbackRequest {
+    /// Stellar address (or admin service ID) authorising the rollback
+    pub changed_by: String,
+}
+
+/// Paginated response for audit log
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuditLogPage {
+    pub items:       Vec<ContractAuditLog>,
+    pub total:       i64,
+    pub page:        i64,
+    pub total_pages: i64,
 }

@@ -346,6 +346,28 @@ pub async fn publish_contract(
     .await
     .map_err(|err| db_internal_error("create initial blue deployment", err))?;
 
+    // Fire-and-forget audit log entry + initial snapshot (version 1)
+    {
+        let pool = state.db.clone();
+        let cid = contract.id;
+        let publisher_addr = req.publisher_address.clone();
+        let snap = serde_json::to_value(&contract).unwrap_or_default();
+        tokio::spawn(async move {
+            if let Err(err) = crate::contract_history_handlers::log_contract_change(
+                &pool,
+                cid,
+                shared::AuditActionType::ContractPublished,
+                None,
+                Some(snap),
+                &publisher_addr,
+            )
+            .await
+            {
+                tracing::warn!(error = ?err, "failed to write initial audit log entry");
+            }
+        });
+    }
+
     Ok(Json(contract))
 }
 
