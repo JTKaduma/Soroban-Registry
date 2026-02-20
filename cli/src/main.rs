@@ -10,6 +10,7 @@ mod profiler;
 mod sla;
 mod test_framework;
 mod wizard;
+mod formal_verification;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -248,6 +249,24 @@ pub enum Commands {
         action: ConfigSubcommands,
     },
     
+    /// Run formal verification analysis against a deployed or local contract
+    VerifyFormal {
+        /// Path to contract file
+        contract_path: String,
+        
+        /// Path to properties DSL file
+        #[arg(long)]
+        properties: String,
+        
+        /// Output format (json or text)
+        #[arg(long, default_value = "text")]
+        output: String,
+        
+        /// Post results back to registry
+        #[arg(long)]
+        post: bool,
+    },
+
     ScanDeps {
         #[arg(long)]
         contract_id: String,
@@ -650,6 +669,9 @@ async fn main() -> Result<()> {
             ConfigSubcommands::Rollback { contract_id, environment, version, created_by } => {
                 commands::config_rollback(&cli.api_url, &contract_id, &environment, version, &created_by).await?;
             }
+        },
+        Commands::VerifyFormal { contract_path, properties, output, post } => {
+            formal_verification::run(&cli.api_url, &contract_path, &properties, &output, post).await?;
         },
         Commands::ScanDeps { contract_id, dependencies, fail_on_high } => {
             commands::scan_deps(&cli.api_url, &contract_id, &dependencies, fail_on_high).await?;
