@@ -69,6 +69,9 @@ const DependencyGraph = forwardRef<DependencyGraphHandle, DependencyGraphProps>(
     const gRef = useRef<d3.Selection<SVGGElement, unknown, null, undefined> | null>(null);
     const [tooltip, setTooltip] = useState<TooltipState | null>(null);
     const containerRef = useRef<HTMLDivElement>(null);
+    // Pinned node IDs — their fx/fy are kept fixed in the simulation
+    const [pinnedNodes, setPinnedNodes] = useState<Set<string>>(new Set());
+    const pinnedRef = useRef<Set<string>>(new Set());
 
     // ── Large-graph performance flags ─────────────────────────────────────────
     const isLargeGraph = nodes.length > 200;
@@ -282,7 +285,7 @@ const DependencyGraph = forwardRef<DependencyGraphHandle, DependencyGraphProps>(
           .text((d) => d.data.name.length > 14 ? d.data.name.slice(0, 13) + "…" : d.data.name);
       }
 
-      // ── Drag ──
+      // ── Drag: release non-pinned nodes, keep pinned fixed ──
       const drag = d3.drag<SVGGElement, SimNode>()
         .on("start", (event, d) => {
           if (!event.active) simulation.alphaTarget(0.3).restart();
@@ -295,9 +298,36 @@ const DependencyGraph = forwardRef<DependencyGraphHandle, DependencyGraphProps>(
         })
         .on("end", (event, d) => {
           if (!event.active) simulation.alphaTarget(0);
-          d.fx = null;
-          d.fy = null;
+          // Only release if NOT pinned
+          if (!pinnedRef.current.has(d.id)) {
+            d.fx = null;
+            d.fy = null;
+          }
         });
+
+      // ── Pin indicator (small cross symbol) ──
+      const pinGroup = nodeEls.append("g")
+        .attr("class", "pin-indicator")
+        .attr("pointer-events", "none")
+        .attr("display", "none");
+
+      pinGroup.append("circle")
+        .attr("r", 5)
+        .attr("cx", (d) => d.radius - 4)
+        .attr("cy", -d3.max([6, 6])!)
+        .attr("fill", "#f97316")
+        .attr("stroke", "#1f2937")
+        .attr("stroke-width", 1.5);
+
+      pinGroup.append("text")
+        .attr("x", (d) => d.radius - 4)
+        .attr("y", -3)
+        .attr("text-anchor", "middle")
+        .attr("fill", "white")
+        .attr("font-size", "7px")
+        .attr("font-weight", "bold")
+        .attr("pointer-events", "none")
+        .text("P");
 
       nodeEls.call(drag as unknown as (selection: d3.Selection<SVGGElement, SimNode, SVGGElement, unknown>) => void);
 
@@ -319,10 +349,38 @@ const DependencyGraph = forwardRef<DependencyGraphHandle, DependencyGraphProps>(
 
       nodeEls.on("mouseleave", () => setTooltip(null));
 
-      // ── Click ──
+      // ── Click: select node ──
       nodeEls.on("click", (event: MouseEvent, d) => {
         event.stopPropagation();
         onNodeClick?.(d.data);
+      });
+
+      // ── Double-click: pin / unpin node ──
+      nodeEls.on("dblclick", (event: MouseEvent, d) => {
+        event.stopPropagation();
+        const isPinned = pinnedRef.current.has(d.id);
+        if (isPinned) {
+          // Unpin: release from fixed position
+          pinnedRef.current.delete(d.id);
+          d.fx = null;
+          d.fy = null;
+          // Hide pin indicator
+          d3.select(event.currentTarget as SVGGElement)
+            .select(".pin-indicator")
+            .attr("display", "none");
+        } else {
+          // Pin: lock current position
+          pinnedRef.current.add(d.id);
+          d.fx = d.x;
+          d.fy = d.y;
+          // Show pin indicator
+          d3.select(event.currentTarget as SVGGElement)
+            .select(".pin-indicator")
+            .attr("display", null);
+        }
+        // Sync React state for hint text
+        setPinnedNodes(new Set(pinnedRef.current));
+        simulation.alphaTarget(0.1).restart();
       });
 
       svg.on("click", () => onNodeClick?.(null));

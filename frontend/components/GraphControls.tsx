@@ -242,6 +242,10 @@ export default function GraphControls({
                             <span className="text-gray-400">Drag</span>
                             <span className="text-gray-500">move nodes</span>
                         </div>
+                        <div className="flex justify-between gap-4">
+                            <span className="text-gray-400">Double-click</span>
+                            <span className="text-gray-500">pin / unpin</span>
+                        </div>
                     </div>
                 </div>
             </div>
