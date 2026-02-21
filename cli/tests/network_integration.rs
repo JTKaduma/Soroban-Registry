@@ -1,6 +1,6 @@
-use std::process::Command;
 use std::env;
 use std::path::PathBuf;
+use std::process::Command;
 
 fn get_binary_path() -> PathBuf {
     // When running tests via cargo test, CARGO_BIN_EXE_<name> is set
@@ -51,7 +51,7 @@ fn test_network_flag_global() {
         .arg("0") // minimize output/effect
         .output()
         .expect("Failed to execute command");
-    
+
     // Even if it fails to connect to API, it should have parsed args successfully.
     // If API connection fails (likely in test env), output.status will be exit code 1 due to anyhow context "Failed to list contracts".
     // But stderr should NOT contain "Invalid network".

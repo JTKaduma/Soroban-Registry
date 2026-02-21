@@ -3,10 +3,15 @@
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import TemplateGallery from '@/components/TemplateGallery';
+<<<<<<< HEAD
 import { Package, Sparkles, Terminal } from 'lucide-react';
 import Link from 'next/link';
 import { useAnalytics } from '@/hooks/useAnalytics';
 import { useEffect } from 'react';
+=======
+import { Sparkles, Terminal } from 'lucide-react';
+import Navbar from '@/components/Navbar';
+>>>>>>> bf33e5b9ccbaba0b83d5ef0ac28d977a2cdc6198
 
 export default function TemplatesPage() {
     const { data: templates, isLoading, error } = useQuery({
@@ -24,6 +29,7 @@ export default function TemplatesPage() {
     }, [error, logEvent]);
 
     return (
+<<<<<<< HEAD
         <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50/30 to-purple-50/30 dark:from-gray-950 dark:via-blue-950/20 dark:to-purple-950/20">
             <nav className="border-b border-gray-200 dark:border-gray-800 bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm sticky top-0 z-50">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -48,6 +54,10 @@ export default function TemplatesPage() {
                     </div>
                 </div>
             </nav>
+=======
+        <div className="min-h-screen bg-linear-to-br from-gray-50 via-blue-50/30 to-purple-50/30 dark:from-gray-950 dark:via-blue-900/10 dark:to-purple-900/10">
+            <Navbar />
+>>>>>>> bf33e5b9ccbaba0b83d5ef0ac28d977a2cdc6198
 
             <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
                 <div className="mb-12">
@@ -75,13 +85,9 @@ export default function TemplatesPage() {
                 </div>
 
                 {isLoading ? (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                        {Array.from({ length: 6 }).map((_, i) => (
-                            <div key={i} className="h-48 rounded-xl bg-gray-200 dark:bg-gray-800 animate-pulse" />
-                        ))}
-                    </div>
+                    <TemplateGallery templates={[]} isLoading={true} />
                 ) : (
-                    <TemplateGallery templates={templates ?? []} />
+                    <TemplateGallery templates={templates ?? []} isLoading={false} />
                 )}
             </section>
         </div>

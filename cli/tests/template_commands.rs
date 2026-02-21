@@ -1,11 +1,10 @@
-use std::process::Command;
 use std::env;
 use std::path::PathBuf;
+use std::process::Command;
 
 fn binary() -> PathBuf {
     PathBuf::from(
-        env::var("CARGO_BIN_EXE_soroban-registry")
-            .expect("CARGO_BIN_EXE_soroban-registry not set"),
+        env::var("CARGO_BIN_EXE_soroban-registry").expect("CARGO_BIN_EXE_soroban-registry not set"),
     )
 }
 
@@ -42,20 +41,30 @@ fn template_list_fails_gracefully_without_api() {
 
     assert!(!out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(!stderr.contains("Invalid network"), "should not be a network parse error");
+    assert!(
+        !stderr.contains("Invalid network"),
+        "should not be a network parse error"
+    );
 }
 
 #[test]
 fn template_clone_fails_gracefully_without_api() {
     let out = Command::new(binary())
         .args([
-            "--api-url", "http://127.0.0.1:19999",
-            "template", "clone", "token", "my-token",
+            "--api-url",
+            "http://127.0.0.1:19999",
+            "template",
+            "clone",
+            "token",
+            "my-token",
         ])
         .output()
         .expect("failed to run binary");
 
     assert!(!out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(!stderr.contains("unexpected argument"), "arg parsing should succeed");
+    assert!(
+        !stderr.contains("unexpected argument"),
+        "arg parsing should succeed"
+    );
 }

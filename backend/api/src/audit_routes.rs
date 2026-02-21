@@ -40,32 +40,26 @@ pub fn security_audit_routes() -> Router<AppState> {
             "/api/contracts/:id/security-audits",
             get(audit_handlers::list_security_audits),
         )
-
         // Get latest audit / Create new audit
         .route(
             "/api/contracts/:id/security-audit",
-            get(audit_handlers::get_security_audit)
-                .post(audit_handlers::create_security_audit),
+            get(audit_handlers::get_security_audit).post(audit_handlers::create_security_audit),
         )
-
         // Get specific historical audit
         .route(
             "/api/contracts/:id/security-audit/:audit_id",
             get(audit_handlers::get_security_audit_by_id),
         )
-
         // Update a single check status (auditor interaction)
         .route(
             "/api/contracts/:id/security-audit/:audit_id/checks/:check_id",
             patch(audit_handlers::update_check),
         )
-
         // Re-run source-code auto-detection on an existing audit
         .route(
             "/api/contracts/:id/security-audit/:audit_id/run-autocheck",
             post(audit_handlers::run_autocheck),
         )
-
         // Export audit as Markdown download
         .route(
             "/api/contracts/:id/security-audit/:audit_id/export",

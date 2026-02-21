@@ -1,0 +1,26 @@
+# Formal Verification Properties DSL Example
+# Used by `soroban-registry verify-formal`
+
+[[property]]
+id = "auth-001"
+description = "All state-modifying functions require authorization"
+invariant = "caller_is_auth"
+severity = "critical"
+
+[[property]]
+id = "math-001"
+description = "Calculations are overflow-safe"
+invariant = "checked_arithmetic"
+severity = "high"
+
+[[property]]
+id = "reentrancy-001"
+description = "Token transfers are protected from reentrancy"
+invariant = "no_reentrancy"
+severity = "critical"
+
+[[property]]
+id = "access-001"
+description = "Admin-only functions validate role correctly"
+invariant = "admin_check"
+severity = "high"

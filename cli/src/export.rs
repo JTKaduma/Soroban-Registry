@@ -23,11 +23,7 @@ pub fn create_archive(
     let tmp_dir = tempfile::tempdir().context("failed to create temp dir")?;
     let inner_path = tmp_dir.path().join("contract.tar.gz");
 
-    let mut manifest = ExportManifest::new(
-        contract_id.into(),
-        name.into(),
-        network.into(),
-    );
+    let mut manifest = ExportManifest::new(contract_id.into(), name.into(), network.into());
 
     build_inner_archive(contract_dir, &inner_path, &mut manifest)?;
     manifest.sha256 = compute_sha256_streaming(&inner_path)?;
@@ -78,9 +74,10 @@ fn walk_and_append<W: Write>(
                 .modified()
                 .ok()
                 .and_then(|t| {
-                    t.duration_since(std::time::UNIX_EPOCH)
-                        .ok()
-                        .and_then(|d| Utc.timestamp_opt(d.as_secs() as i64, d.subsec_nanos()).single())
+                    t.duration_since(std::time::UNIX_EPOCH).ok().and_then(|d| {
+                        Utc.timestamp_opt(d.as_secs() as i64, d.subsec_nanos())
+                            .single()
+                    })
                 })
                 .unwrap_or_else(Utc::now);
 
@@ -96,11 +93,7 @@ fn walk_and_append<W: Write>(
             header.set_cksum();
 
             let f = BufReader::new(File::open(&path)?);
-            builder.append_data(
-                &mut header,
-                rel.to_string_lossy().replace('\\', "/"),
-                f,
-            )?;
+            builder.append_data(&mut header, rel.to_string_lossy().replace('\\', "/"), f)?;
         }
     }
     Ok(())

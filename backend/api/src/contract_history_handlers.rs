@@ -23,8 +23,8 @@ use crate::{
     state::AppState,
 };
 use shared::{
-    AuditActionType, AuditLogPage, ContractAuditLog, ContractSnapshot, FieldChange, RollbackRequest,
-    VersionDiff,
+    AuditActionType, AuditLogPage, ContractAuditLog, ContractSnapshot, FieldChange,
+    RollbackRequest, VersionDiff,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -63,8 +63,12 @@ pub struct PaginationParams {
     #[serde(default = "default_limit")]
     pub limit: i64,
 }
-fn default_page() -> i64 { 1 }
-fn default_limit() -> i64 { 20 }
+fn default_page() -> i64 {
+    1
+}
+fn default_limit() -> i64 {
+    20
+}
 
 pub async fn get_full_history(
     State(state): State<AppState>,
@@ -82,13 +86,12 @@ pub async fn get_full_history(
 
     let offset = (params.page - 1) * params.limit;
 
-    let total: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM contract_audit_log WHERE contract_id = $1",
-    )
-    .bind(contract_id)
-    .fetch_one(&state.db)
-    .await
-    .map_err(|e| db_err("count audit log", e))?;
+    let total: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM contract_audit_log WHERE contract_id = $1")
+            .bind(contract_id)
+            .fetch_one(&state.db)
+            .await
+            .map_err(|e| db_err("count audit log", e))?;
 
     let items: Vec<ContractAuditLog> = sqlx::query_as(
         "SELECT id, contract_id, action_type, old_value, new_value, changed_by, timestamp, previous_hash, hash, signature
@@ -141,6 +144,8 @@ pub async fn export_history_csv(
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
+    let mut csv =
+        String::from("id,contract_id,action_type,old_value,new_value,changed_by,timestamp\n");
     let mut csv = String::from("id,contract_id,action_type,old_value,new_value,changed_by,timestamp,previous_hash,hash,signature\n");
 
     for entry in &entries {
@@ -304,7 +309,13 @@ pub async fn diff_versions(
         _ => db_err("fetch snapshot v2", err),
     })?;
 
-    let diff = compute_diff(contract_id, v1, v2, &snap_a.snapshot_data, &snap_b.snapshot_data);
+    let diff = compute_diff(
+        contract_id,
+        v1,
+        v2,
+        &snap_a.snapshot_data,
+        &snap_b.snapshot_data,
+    );
     Ok(Json(diff))
 }
 
@@ -337,16 +348,19 @@ pub async fn rollback_contract(
     })?;
 
     // 2. Read the current contract state (for old_value in the audit log)
-    let current_data: serde_json::Value = sqlx::query_scalar(
-        "SELECT row_to_json(contracts.*) FROM contracts WHERE id = $1",
-    )
-    .bind(contract_id)
-    .fetch_one(&state.db)
-    .await
-    .map_err(|e| db_err("read current contract for rollback", e))?;
+    let current_data: serde_json::Value =
+        sqlx::query_scalar("SELECT row_to_json(contracts.*) FROM contracts WHERE id = $1")
+            .bind(contract_id)
+            .fetch_one(&state.db)
+            .await
+            .map_err(|e| db_err("read current contract for rollback", e))?;
 
     // 3. Begin transaction
-    let mut tx = state.db.begin().await.map_err(|e| db_err("begin rollback tx", e))?;
+    let mut tx = state
+        .db
+        .begin()
+        .await
+        .map_err(|e| db_err("begin rollback tx", e))?;
 
     // 4. Extract fields from the snapshot and apply them back
     let snap = &snapshot.snapshot_data;
@@ -394,13 +408,11 @@ pub async fn rollback_contract(
     .map_err(|e| db_err("insert rollback audit log", e))?;
 
     // 6. Determine next version number and write new snapshot
-    let next_ver: i32 = sqlx::query_scalar(
-        "SELECT next_contract_version($1)",
-    )
-    .bind(contract_id)
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(|e| db_err("next version number", e))?;
+    let next_ver: i32 = sqlx::query_scalar("SELECT next_contract_version($1)")
+        .bind(contract_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|e| db_err("next version number", e))?;
 
     sqlx::query(
         "INSERT INTO contract_snapshots
@@ -415,7 +427,9 @@ pub async fn rollback_contract(
     .await
     .map_err(|e| db_err("insert post-rollback snapshot", e))?;
 
-    tx.commit().await.map_err(|e| db_err("commit rollback tx", e))?;
+    tx.commit()
+        .await
+        .map_err(|e| db_err("commit rollback tx", e))?;
 
     tracing::info!(
         contract_id = %contract_id,
@@ -495,11 +509,10 @@ pub async fn log_contract_change(
 
     // If we have a new_value, persist a snapshot
     if let Some(ref snap_data) = new_value {
-        let next_ver: i32 =
-            sqlx::query_scalar("SELECT next_contract_version($1)")
-                .bind(contract_id)
-                .fetch_one(&mut *tx)
-                .await?;
+        let next_ver: i32 = sqlx::query_scalar("SELECT next_contract_version($1)")
+            .bind(contract_id)
+            .fetch_one(&mut *tx)
+            .await?;
 
         sqlx::query(
             "INSERT INTO contract_snapshots
@@ -526,7 +539,7 @@ fn compute_diff(
     a: &serde_json::Value,
     b: &serde_json::Value,
 ) -> VersionDiff {
-    let mut added   = Vec::new();
+    let mut added = Vec::new();
     let mut removed = Vec::new();
     let mut modified = Vec::new();
 

@@ -1,8 +1,8 @@
-use std::time::Instant;
-use std::sync::Arc;
-use sqlx::PgPool;
+use crate::cache::{CacheConfig, CacheLayer};
 use prometheus::Registry;
-use crate::cache::{CacheLayer, CacheConfig};
+use sqlx::PgPool;
+use std::sync::Arc;
+use std::time::Instant;
 
 /// Application state shared across handlers
 #[derive(Clone)]

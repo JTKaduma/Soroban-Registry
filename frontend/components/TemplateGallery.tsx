@@ -2,17 +2,50 @@
 
 import { useState } from 'react';
 import TemplateCard from './TemplateCard';
+import TemplateCardSkeleton from './TemplateCardSkeleton';
 import { Template } from '@/lib/api';
 import { LayoutGrid } from 'lucide-react';
 
 const CATEGORIES = ['all', 'token', 'dex', 'bridge', 'oracle', 'lending'];
 
-export default function TemplateGallery({ templates }: { templates: Template[] }) {
+export default function TemplateGallery({ 
+  templates, 
+  isLoading = false 
+}: { 
+  templates: Template[];
+  isLoading?: boolean;
+}) {
     const [activeCategory, setActiveCategory] = useState('all');
 
     const filtered = activeCategory === 'all'
         ? templates
         : templates.filter((t) => t.category === activeCategory);
+
+    if (isLoading) {
+        return (
+            <div>
+                <div className="flex flex-wrap gap-2 mb-8">
+                    {CATEGORIES.map((cat) => (
+                        <button
+                            key={cat}
+                            disabled
+                            className="px-4 py-2 rounded-full text-sm font-medium border bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-700 opacity-50 cursor-not-allowed"
+                        >
+                            {cat.charAt(0).toUpperCase() + cat.slice(1)}
+                        </button>
+                    ))}
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    <TemplateCardSkeleton />
+                    <TemplateCardSkeleton />
+                    <TemplateCardSkeleton />
+                    <TemplateCardSkeleton />
+                    <TemplateCardSkeleton />
+                    <TemplateCardSkeleton />
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div>

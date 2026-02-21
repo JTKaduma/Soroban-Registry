@@ -12,11 +12,25 @@ import {
   Globe,
   Github,
   Tag,
+  GitCompare,
 } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+<<<<<<< HEAD
 import { useAnalytics } from "@/hooks/useAnalytics";
 import { useEffect } from "react";
+=======
+import FormalVerificationPanel from "@/components/FormalVerificationPanel";
+import Navbar from "@/components/Navbar";
+import MaintenanceBanner from "@/components/MaintenanceBanner";
+import { useQueryClient } from "@tanstack/react-query";
+import DeprecationBanner from "@/components/DeprecationBanner";
+
+// Mock for maintenance status since it was missing in the original file view but used in code
+const maintenanceStatus = { is_maintenance: false, current_window: null };
+
+
+>>>>>>> bf33e5b9ccbaba0b83d5ef0ac28d977a2cdc6198
 
 function ContractDetailsContent() {
   const params = useParams();
@@ -46,6 +60,12 @@ function ContractDetailsContent() {
       message: "Failed to load contract details",
     });
   }, [error, id, logEvent]);
+
+  const { data: deprecationInfo } = useQuery({
+    queryKey: ["contract-deprecation", id],
+    queryFn: () => api.getDeprecationInfo(id),
+    enabled: !!contract,
+  });
 
   if (isLoading) {
     return (
@@ -78,6 +98,14 @@ function ContractDetailsContent() {
         <ArrowLeft className="w-4 h-4" />
         Back to contracts
       </Link>
+
+      {/* Maintenance Banner */}
+      {maintenanceStatus?.is_maintenance && maintenanceStatus.current_window && (
+        <MaintenanceBanner window={maintenanceStatus.current_window} />
+      )}
+
+      {/* Deprecation Banner */}
+      {deprecationInfo && <DeprecationBanner info={deprecationInfo} />}
 
       {/* Header */}
       <div className="mb-12">
@@ -127,12 +155,21 @@ function ContractDetailsContent() {
         {/* Main Content */}
         <div className="lg:col-span-2 space-y-12">
           {/* Dependency Graph */}
-          <section>
-            <DependencyGraph
-              dependencies={dependencies || []}
-              isLoading={depsLoading}
-            />
-          </section>
+          {depsLoading ? (
+            <section className="bg-white dark:bg-slate-900 rounded-lg p-8">
+              <div className="animate-pulse space-y-4">
+                <div className="h-8 bg-gray-200 dark:bg-gray-800 rounded w-1/3" />
+                <div className="h-96 bg-gray-200 dark:bg-gray-800 rounded-lg" />
+              </div>
+            </section>
+          ) : dependencies ? (
+            <section>
+              <DependencyGraph
+                nodes={[]}
+                edges={[]}
+              />
+            </section>
+          ) : null}
 
           {/* Examples Gallery */}
           <section>
@@ -170,6 +207,21 @@ function ContractDetailsContent() {
               </div>
             </dl>
           </div>
+
+          {/* Compatibility Matrix link */}
+          <Link
+            href={`/contracts/${contract.id}/compatibility`}
+            className="flex items-center gap-3 w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 hover:bg-blue-50 dark:hover:bg-blue-900/20 hover:border-blue-300 dark:hover:border-blue-700 text-gray-700 dark:text-gray-300 hover:text-blue-700 dark:hover:text-blue-300 transition-all group"
+          >
+            <GitCompare className="w-5 h-5 text-gray-400 group-hover:text-blue-500 transition-colors" />
+            <div>
+              <div className="text-sm font-medium">Compatibility Matrix</div>
+              <div className="text-xs text-gray-400 dark:text-gray-500">View version compatibility</div>
+            </div>
+          </Link>
+
+          {/* Formal Verification Panel */}
+          <FormalVerificationPanel contractId={contract.id} />
         </div>
       </div>
     </div>
@@ -178,7 +230,8 @@ function ContractDetailsContent() {
 
 export default function ContractPage() {
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
+    <div className="min-h-screen bg-background text-foreground">
+      <Navbar />
       <Suspense fallback={null}>
         <ContractDetailsContent />
       </Suspense>

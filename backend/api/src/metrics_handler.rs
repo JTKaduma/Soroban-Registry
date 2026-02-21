@@ -9,7 +9,10 @@ pub async fn metrics_endpoint(State(state): State<AppState>) -> impl IntoRespons
     let body = metrics::gather_metrics(&state.registry);
     (
         StatusCode::OK,
-        [(header::CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8")],
+        [(
+            header::CONTENT_TYPE,
+            "text/plain; version=0.0.4; charset=utf-8",
+        )],
         body,
     )
 }
@@ -17,14 +20,14 @@ pub async fn metrics_endpoint(State(state): State<AppState>) -> impl IntoRespons
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::{routing::get, Router};
-    use axum::body::Body;
-    use http::Request;
-    use tower::ServiceExt;
+    use crate::auth::AuthManager;
+    use crate::cache::{CacheConfig, CacheLayer};
+    use crate::resource_tracking::ResourceManager;
+    use axum::extract::State;
+    use axum::response::IntoResponse;
     use prometheus::Registry;
-    use std::sync::Arc;
+    use std::sync::{Arc, RwLock};
     use std::time::Instant;
-    use crate::cache::{CacheLayer, CacheConfig};
 
     fn test_state() -> AppState {
         let registry = Registry::new_custom(Some("test".into()), None).unwrap();
@@ -34,6 +37,8 @@ mod tests {
             started_at: Instant::now(),
             cache: Arc::new(CacheLayer::new(CacheConfig::default())),
             registry,
+            resource_mgr: Arc::new(RwLock::new(ResourceManager::new())),
+            auth_mgr: Arc::new(RwLock::new(AuthManager::new("test-secret".to_string()))),
         }
     }
 
@@ -47,17 +52,15 @@ mod tests {
     #[tokio::test]
     async fn test_metrics_endpoint_returns_200() {
         let state = test_state();
-        let app = Router::new()
-            .route("/metrics", get(metrics_endpoint))
-            .with_state(state);
-
-        let resp = app
-            .oneshot(Request::builder().uri("/metrics").body(Body::empty()).unwrap())
-            .await
-            .unwrap();
+        let resp = metrics_endpoint(State(state)).await.into_response();
 
         assert_eq!(resp.status(), StatusCode::OK);
-        let ct = resp.headers().get(header::CONTENT_TYPE).unwrap().to_str().unwrap();
+        let ct = resp
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .unwrap()
+            .to_str()
+            .unwrap();
         assert!(ct.contains("text/plain"));
     }
 
@@ -67,16 +70,11 @@ mod tests {
         metrics::CONTRACTS_PUBLISHED.inc();
         metrics::observe_http("GET", "/health", 200, 0.001);
 
-        let app = Router::new()
-            .route("/metrics", get(metrics_endpoint))
-            .with_state(state);
+        let resp = metrics_endpoint(State(state)).await.into_response();
 
-        let resp = app
-            .oneshot(Request::builder().uri("/metrics").body(Body::empty()).unwrap())
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
             .await
             .unwrap();
-
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let text = String::from_utf8(body.to_vec()).unwrap();
         assert!(text.contains("http_requests_total"));
         assert!(text.contains("contracts_published_total"));

@@ -10,7 +10,7 @@ use crate::state::AppState;
 /// Main loop for the health monitor background task
 pub async fn run_health_monitor(state: AppState) {
     info!("Starting health monitor background task");
-    
+
     // Run every 24 hours in production, but for demo/dev we can run it more frequently or on startup
     // For now, we'll run it on startup and then every hour
     let mut interval = time::interval(time::Duration::from_secs(3600));
@@ -30,15 +30,16 @@ async fn perform_health_checks(pool: &PgPool) -> Result<()> {
     let contracts: Vec<Contract> = sqlx::query_as("SELECT * FROM contracts")
         .fetch_all(pool)
         .await?;
-        
+
     info!("Found {} contracts to check", contracts.len());
 
     for contract in contracts {
         // 2. Fetch stats (last activity)
-        let stats: Option<ContractStats> = sqlx::query_as("SELECT * FROM contract_stats WHERE contract_id = $1")
-            .bind(contract.id)
-            .fetch_optional(pool)
-            .await?;
+        let stats: Option<ContractStats> =
+            sqlx::query_as("SELECT * FROM contract_stats WHERE contract_id = $1")
+                .bind(contract.id)
+                .fetch_optional(pool)
+                .await?;
 
         // 3. Fetch verification status (if not in contract struct, though it is)
         // contract.is_verified is available
@@ -56,7 +57,7 @@ async fn perform_health_checks(pool: &PgPool) -> Result<()> {
 
 fn calculate_health(contract: &Contract, stats: Option<&ContractStats>) -> ContractHealth {
     let mut score = 100;
-    
+
     // Penalize for not being verified
     if !contract.is_verified {
         score -= 40;
@@ -66,19 +67,19 @@ fn calculate_health(contract: &Contract, stats: Option<&ContractStats>) -> Contr
     let last_activity = stats
         .and_then(|s| s.last_interaction)
         .unwrap_or(contract.created_at);
-        
+
     let days_since_activity = (Utc::now() - last_activity).num_days();
-    
+
     if days_since_activity > 30 {
         score -= 20;
     }
-    
+
     if days_since_activity > 90 {
         score -= 20;
     }
 
     // Placeholder for audit check (not implemented yet)
-    // score -= 10; 
+    // score -= 10;
 
     // Ensure score is within 0-100
     score = score.max(0).min(100);
@@ -91,11 +92,12 @@ fn calculate_health(contract: &Contract, stats: Option<&ContractStats>) -> Contr
         _ => {
             tracing::warn!(contract_id = %contract.id, score, "Contract health is critical");
             HealthStatus::Critical
-        },
+        }
     };
 
     if !contract.is_verified {
-        recommendations.push("Verify the contract source code to improve trust and health score.".to_string());
+        recommendations
+            .push("Verify the contract source code to improve trust and health score.".to_string());
     }
 
     if days_since_activity > 90 {

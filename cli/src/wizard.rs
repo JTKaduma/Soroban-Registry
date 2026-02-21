@@ -326,9 +326,9 @@ fn prompt_with_validation<F>(
     default: Option<String>,
     validate: F,
     error_msg: &str,
-) -> Result<String> 
-where 
-    F: FnMut(&str) -> bool 
+) -> Result<String>
+where
+    F: FnMut(&str) -> bool,
 {
     loop {
         let value = prompt(label, default.clone())?;

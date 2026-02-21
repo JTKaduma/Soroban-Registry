@@ -152,13 +152,13 @@ impl Fuzzer {
 
     fn extract_functions(path: &Path) -> Result<Vec<FunctionSignature>> {
         let wasm_bytes = fs::read(path).context("Failed to read WASM file")?;
-        
+
         let mut functions = Vec::new();
-        
+
         let mut hasher = Sha256::new();
         hasher.update(&wasm_bytes);
         let hash = hex::encode(hasher.finalize());
-        
+
         let common_functions = vec![
             FunctionSignature {
                 name: "init".to_string(),
@@ -211,9 +211,9 @@ impl Fuzzer {
                 output: Some("bool".to_string()),
             },
         ];
-        
+
         functions.extend(common_functions);
-        
+
         println!(
             "  {} Extracted {} function signatures (mock - using common patterns)",
             "→".bright_black(),
@@ -229,29 +229,20 @@ impl Fuzzer {
 
         println!("\n{}", "Starting Fuzzer...".bold().cyan());
         println!("{}", "=".repeat(80).cyan());
-        println!(
-            "  {} {}",
-            "Contract:".bold(),
-            self.contract_path.display()
-        );
-        println!(
-            "  {} {:?}",
-            "Duration:".bold(),
-            self.config.duration
-        );
-        println!(
-            "  {} {:?}",
-            "Timeout per call:".bold(),
-            self.config.timeout
-        );
+        println!("  {} {}", "Contract:".bold(), self.contract_path.display());
+        println!("  {} {:?}", "Duration:".bold(), self.config.duration);
+        println!("  {} {:?}", "Timeout per call:".bold(), self.config.timeout);
         println!("  {} {}", "Threads:".bold(), self.config.threads);
         println!("  {} {}", "Functions:".bold(), self.functions.len());
-        println!("  {} {}", "Output:".bold(), self.config.output_dir.display());
+        println!(
+            "  {} {}",
+            "Output:".bold(),
+            self.config.output_dir.display()
+        );
         println!("  {} {}", "Minimize:".bold(), self.config.minimize);
         println!();
 
-        fs::create_dir_all(&self.config.output_dir)
-            .context("Failed to create output directory")?;
+        fs::create_dir_all(&self.config.output_dir).context("Failed to create output directory")?;
         fs::create_dir_all(self.config.output_dir.join("crashes"))
             .context("Failed to create crashes directory")?;
         fs::create_dir_all(self.config.output_dir.join("corpus"))
@@ -276,7 +267,7 @@ impl Fuzzer {
                         || cases_run.load(Ordering::Relaxed) < fuzzer.config.max_cases)
                 {
                     let case_num = cases_run.fetch_add(1, Ordering::Relaxed);
-                    
+
                     if case_num % 1000 == 0 && case_num > 0 {
                         print!(
                             "\r  {} Test cases run: {} | Crashes: {}    ",
@@ -288,7 +279,7 @@ impl Fuzzer {
                     }
 
                     let input = fuzzer.generate_input(&mut rng);
-                    
+
                     match fuzzer.execute_input(&input).await {
                         Ok(_) => {}
                         Err(crash) => {
@@ -298,7 +289,7 @@ impl Fuzzer {
                         }
                     }
                 }
-                
+
                 println!("\n  {} Thread {} finished", "→".bright_black(), thread_id);
             });
 
@@ -332,13 +323,13 @@ impl Fuzzer {
         for handle in handles {
             handle.await?;
         }
-        
+
         stats_handle.abort();
 
         self.stop_flag.store(true, Ordering::Relaxed);
 
         let crashes = self.crashes.lock().await;
-        
+
         if self.config.minimize && !crashes.is_empty() {
             println!("\n{}", "Minimizing crash inputs...".bold().cyan());
             for crash in crashes.iter() {
@@ -347,9 +338,9 @@ impl Fuzzer {
         }
 
         self.save_crashes(&crashes)?;
-        
+
         let end_time = chrono::Utc::now();
-        
+
         let report = FuzzReport {
             contract_path: self.contract_path.to_string_lossy().to_string(),
             start_time: start_time.to_rfc3339(),
@@ -411,16 +402,15 @@ impl Fuzzer {
             }
             ArgType::Address => {
                 let addr: String = (0..56)
-                    .map(|_| "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567".as_bytes()[rng.gen_range(0..32)]
-                        as char)
+                    .map(|_| {
+                        "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567".as_bytes()[rng.gen_range(0..32)] as char
+                    })
                     .collect();
                 FuzzValue::Address(addr)
             }
             ArgType::Symbol => {
                 let s: String = (0..10)
-                    .map(|_| {
-                        "abcdefghijklmnopqrstuvwxyz_".as_bytes()[rng.gen_range(0..27)] as char
-                    })
+                    .map(|_| "abcdefghijklmnopqrstuvwxyz_".as_bytes()[rng.gen_range(0..27)] as char)
                     .collect();
                 FuzzValue::Symbol(s)
             }
@@ -454,7 +444,7 @@ impl Fuzzer {
     async fn execute_input(&self, input: &FuzzInput) -> Result<(), CrashCase> {
         let mut rng = StdRng::from_entropy();
         let error_prob = rng.gen::<f64>();
-        
+
         if error_prob < 0.001 {
             let error_types = [
                 ErrorType::Panic,
@@ -464,7 +454,7 @@ impl Fuzzer {
                 ErrorType::InvalidInput,
             ];
             let error_type = error_types[rng.gen_range(0..error_types.len())].clone();
-            
+
             let error_message = match &error_type {
                 ErrorType::Panic => format!(
                     "Contract panicked in function {} with assertion failure",
@@ -509,7 +499,7 @@ impl Fuzzer {
 
     fn generate_reproduction_code(&self, input: &FuzzInput) -> String {
         let args_str: Vec<String> = input.args.iter().map(|v| format!("{:?}", v)).collect();
-        
+
         format!(
             r#"// Reproduction code for fuzz crash
 // Generated by soroban-registry fuzz
@@ -557,7 +547,7 @@ fn test_crash_reproduction() {{
                 .join(format!("{}.json", crash.id));
             let crash_json = serde_json::to_string_pretty(crash)?;
             fs::write(&crash_file, crash_json)?;
-            
+
             let input_file = self
                 .config
                 .output_dir
@@ -565,7 +555,7 @@ fn test_crash_reproduction() {{
                 .join(format!("{}.input", crash.id));
             let input_json = serde_json::to_string(&crash.input)?;
             fs::write(&input_file, input_json)?;
-            
+
             let repro_file = self
                 .config
                 .output_dir
@@ -580,7 +570,7 @@ fn test_crash_reproduction() {{
         let report_file = self.config.output_dir.join("fuzz-report.json");
         let report_json = serde_json::to_string_pretty(report)?;
         fs::write(&report_file, report_json)?;
-        
+
         let summary_file = self.config.output_dir.join("summary.md");
         let summary = self.generate_summary(report);
         fs::write(&summary_file, summary)?;
@@ -742,8 +732,7 @@ pub async fn run_fuzzer(
     );
     println!(
         "  {}/{} functions tested",
-        report.functions_tested,
-        report.total_functions
+        report.functions_tested, report.total_functions
     );
     println!();
     println!(
@@ -756,7 +745,7 @@ pub async fn run_fuzzer(
         "→".bright_black(),
         output
     );
-    
+
     if !report.crashes.is_empty() {
         println!(
             "  {} Crashes saved to: {}/crashes/",
@@ -764,7 +753,12 @@ pub async fn run_fuzzer(
             output
         );
         println!();
-        println!("{}", "⚠ Crashes detected! Review the report for details.".red().bold());
+        println!(
+            "{}",
+            "⚠ Crashes detected! Review the report for details."
+                .red()
+                .bold()
+        );
     }
     println!();
 
@@ -786,7 +780,7 @@ mod tests {
     #[test]
     fn test_generate_value() {
         let mut rng = StdRng::from_entropy();
-        
+
         let val = match Fuzzer::generate_value_static(&ArgType::Bool, &mut rng) {
             FuzzValue::Bool(_) => true,
             _ => false,

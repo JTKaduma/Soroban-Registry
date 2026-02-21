@@ -35,3 +35,7 @@ rand = "0.8"
 log = "0.4"
 env_logger = "0.11"
 serde_yaml = "0.9"
+ed25519-dalek = { version = "2.1", features = ["rand_core"] }
+base64 = "0.22"
+bs58 = "0.5"
+ripemd = "0.1"

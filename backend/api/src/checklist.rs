@@ -1000,6 +1000,9 @@ mod tests {
         let checks = all_checks();
         let categories: std::collections::HashSet<_> =
             checks.iter().map(|c| c.category.clone()).collect();
-        assert!(categories.len() >= 10, "Should cover at least 10 categories");
+        assert!(
+            categories.len() >= 10,
+            "Should cover at least 10 categories"
+        );
     }
 }

@@ -30,17 +30,17 @@ function CheckboxGroup({
 }) {
   return (
     <div>
-      <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">{title}</p>
+      <p className="text-sm font-medium text-foreground mb-2">{title}</p>
       <div className="space-y-2">
         {options.map((option) => (
-          <label key={option} className="flex items-center gap-2 cursor-pointer">
+          <label key={option} className="flex items-center gap-2 cursor-pointer group">
             <input
               type="checkbox"
               checked={selected.includes(option)}
               onChange={() => onToggle(option)}
-              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              className="rounded border-border text-primary focus:ring-ring bg-background"
             />
-            <span className="text-sm text-gray-700 dark:text-gray-300">{option}</span>
+            <span className="text-sm text-muted-foreground group-hover:text-foreground transition-colors">{option}</span>
           </label>
         ))}
       </div>
@@ -81,17 +81,17 @@ export function FilterPanel({
       />
 
       <div>
-        <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Network</p>
+        <p className="text-sm font-medium text-foreground mb-2">Network</p>
         <div className="space-y-2">
           {networks.map((network) => (
-            <label key={network} className="flex items-center gap-2 cursor-pointer">
+            <label key={network} className="flex items-center gap-2 cursor-pointer group">
               <input
                 type="checkbox"
                 checked={selectedNetworks.includes(network)}
                 onChange={() => onToggleNetwork(network)}
-                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                className="rounded border-border text-primary focus:ring-ring bg-background"
               />
-              <span className="text-sm capitalize text-gray-700 dark:text-gray-300">
+              <span className="text-sm capitalize text-muted-foreground group-hover:text-foreground transition-colors">
                 {network}
               </span>
             </label>
@@ -100,7 +100,7 @@ export function FilterPanel({
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+        <label className="block text-sm font-medium text-foreground mb-2">
           Author
         </label>
         <input
@@ -108,18 +108,18 @@ export function FilterPanel({
           value={author}
           onChange={(e) => onAuthorChange(e.target.value)}
           placeholder="Publisher username or address"
-          className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary transition-all"
         />
       </div>
 
-      <label className="flex items-center gap-2 cursor-pointer">
+      <label className="flex items-center gap-2 cursor-pointer group">
         <input
           type="checkbox"
           checked={verifiedOnly}
           onChange={(e) => onVerifiedChange(e.target.checked)}
-          className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+          className="rounded border-border text-primary focus:ring-ring bg-background"
         />
-        <span className="text-sm text-gray-700 dark:text-gray-300">Verified only</span>
+        <span className="text-sm text-muted-foreground group-hover:text-foreground transition-colors">Verified only</span>
       </label>
     </div>
   );

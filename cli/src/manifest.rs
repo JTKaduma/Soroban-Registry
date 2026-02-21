@@ -11,6 +11,18 @@ pub struct ExportManifest {
     pub sha256: String,
     pub contents: Vec<ManifestEntry>,
     pub audit_trail: Vec<AuditEntry>,
+    pub signature: Option<PackageSignatureInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PackageSignatureInfo {
+    pub signature: String,
+    pub signing_address: String,
+    pub public_key: String,
+    pub algorithm: String,
+    pub signed_at: DateTime<Utc>,
+    pub expires_at: Option<DateTime<Utc>>,
+    pub key_fingerprint: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,6 +54,17 @@ impl ExportManifest {
                 timestamp: Utc::now(),
                 actor: "soroban-registry-cli".into(),
             }],
+            signature: None,
         }
+    }
+
+    pub fn with_signature(mut self, sig_info: PackageSignatureInfo) -> Self {
+        self.signature = Some(sig_info);
+        self.audit_trail.push(AuditEntry {
+            action: "package_signed".into(),
+            timestamp: Utc::now(),
+            actor: "soroban-registry-cli".into(),
+        });
+        self
     }
 }

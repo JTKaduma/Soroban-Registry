@@ -37,12 +37,11 @@ impl FromStr for Network {
             "mainnet" => Ok(Network::Mainnet),
             "testnet" => Ok(Network::Testnet),
             "futurenet" => Ok(Network::Futurenet),
+            "auto" => Ok(Network::Auto),
             _ => anyhow::bail!(
-                "Invalid network: {}. Allowed values: mainnet, testnet, futurenet",
+                "Invalid network: {}. Allowed values: mainnet, testnet, futurenet, auto",
                 s
             ),
-            "auto" => Ok(Network::Auto), // Issue #78: Allow "auto" string
-            _ => anyhow::bail!("Invalid network: {}. Allowed values: mainnet, testnet, futurenet, auto", s),
         }
     }
 }
@@ -64,6 +63,14 @@ pub struct RuntimeConfig {
     pub network: Network,
     pub api_base: String,
     pub timeout: u64,
+}
+
+pub fn resolve_network(cli_network: Option<String>) -> Result<Network> {
+    let config = load_defaults_section()?;
+    match cli_network.or(config.network) {
+        Some(value) => value.parse::<Network>(),
+        None => Ok(Network::Testnet),
+    }
 }
 
 pub fn resolve_runtime_config(
@@ -130,23 +137,48 @@ pub fn edit_config() -> Result<()> {
         anyhow::bail!("Editor exited with non-zero status");
     }
 
-    // 2. Config File
-    if let Some(config_path) = config_file_path() {
-        if config_path.exists() {
-            let content = fs::read_to_string(&config_path)
-                .with_context(|| format!("Failed to read config file at {:?}", config_path))?;
+    Ok(())
+}
 
-            let config: ConfigFile =
-                toml::from_str(&content).with_context(|| "Failed to parse config file")?;
+fn load_defaults_section() -> Result<DefaultsSection> {
+    let path = match config_file_path() {
+        Some(p) => p,
+        None => return Ok(DefaultsSection::default()),
+    };
 
-            if let Some(net_str) = config.network {
-                return net_str.parse::<Network>();
-            }
-        }
+    if !path.exists() {
+        return Ok(DefaultsSection::default());
     }
 
-    // 3. Default
-    Ok(Network::Mainnet)
+    let config = load_config_file(&path)?;
+    Ok(config.defaults.unwrap_or_default())
+}
+
+fn load_config_file(path: &Path) -> Result<ConfigFile> {
+    let content = fs::read_to_string(path)
+        .with_context(|| format!("Failed to read config file at {:?}", path))?;
+    toml::from_str(&content).with_context(|| "Failed to parse config file")
+}
+
+fn ensure_config_file_exists(path: &Path) -> Result<()> {
+    if path.exists() {
+        return Ok(());
+    }
+
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create directory {:?}", parent))?;
+    }
+
+    let default_content = r#"[defaults]
+network = "testnet"
+api_base = "http://localhost:3001"
+timeout = 30
+"#;
+    fs::write(path, default_content)
+        .with_context(|| format!("Failed to write default config to {:?}", path))?;
+
+    Ok(())
 }
 
 fn config_file_path() -> Option<PathBuf> {
@@ -193,8 +225,4 @@ timeout = 55
         assert_eq!(defaults.api_base.as_deref(), Some("http://localhost:9000"));
         assert_eq!(defaults.timeout, Some(55));
     }
-}
-        // Note: Integration tests involving file system would require mocking or temporary files.
-    // Given the constraints and the environment, we focus on unit tests for parsing here.
-    // `resolve_network` with file interaction is harder to test in isolation without dependency injection or mocking `dirs` / `fs`.
 }

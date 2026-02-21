@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import ExampleCard from './ExampleCard';
+import ExampleCardSkeleton from './ExampleCardSkeleton';
 import { AlertCircle, Terminal, Search } from 'lucide-react';
 import { useAnalytics } from '@/hooks/useAnalytics';
 import { useEffect } from 'react';
@@ -32,7 +33,24 @@ export default function ExampleGallery({ contractId }: ExampleGalleryProps) {
   }, [error, contractId, logEvent]);
 
   if (isLoading) {
-    return <div className="animate-pulse h-64 bg-gray-100 dark:bg-gray-800 rounded-xl" />;
+    return (
+      <div className="space-y-8">
+        <div className="flex flex-col gap-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
+                Usage Examples
+              </h2>
+            </div>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 gap-8">
+          <ExampleCardSkeleton />
+          <ExampleCardSkeleton />
+          <ExampleCardSkeleton />
+        </div>
+      </div>
+    );
   }
 
   if (error) {

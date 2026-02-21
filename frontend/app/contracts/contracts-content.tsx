@@ -1,17 +1,22 @@
 'use client';
 
+import React, { useState, useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { api, ContractSearchParams } from '@/lib/api';
+import { api, ContractSearchParams, Contract } from '@/lib/api';
 import ContractCard from '@/components/ContractCard';
+import ContractCardSkeleton from '@/components/ContractCardSkeleton';
 import { ActiveFilters } from '@/components/contracts/ActiveFilters';
 import { FilterPanel } from '@/components/contracts/FilterPanel';
 import { ResultsCount } from '@/components/contracts/ResultsCount';
 import { SearchBar } from '@/components/contracts/SearchBar';
 import { SortDropdown, SortBy } from '@/components/contracts/SortDropdown';
-import { Filter, Package, SlidersHorizontal, X } from 'lucide-react';
+import { Filter, Package, SlidersHorizontal, X, ArrowUpDown } from 'lucide-react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+<<<<<<< HEAD
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAnalytics } from '@/hooks/useAnalytics';
+=======
+>>>>>>> bf33e5b9ccbaba0b83d5ef0ac28d977a2cdc6198
 
 const DEFAULT_PAGE_SIZE = 12;
 const CATEGORY_OPTIONS = [
@@ -68,6 +73,7 @@ type ContractsUiFilters = {
   networks: NonNullable<ContractSearchParams['network']>[];
   verified_only: boolean;
   sort_by: SortBy;
+  sort_order: 'asc' | 'desc';
   page: number;
   page_size: number;
 };
@@ -80,8 +86,12 @@ function getInitialFilters(searchParams: URLSearchParams): ContractsUiFilters {
     (network): network is NonNullable<ContractSearchParams['network']> =>
       network === 'mainnet' || network === 'testnet' || network === 'futurenet',
   );
-  const sortBy = searchParams.get('sort_by');
+
+  const sortBy = searchParams.get('sort_by') as SortBy;
+  const sortOrder = searchParams.get('sort_order') as 'asc' | 'desc';
   const parsedPage = Number(searchParams.get('page') || '1');
+
+  const validSortBys: SortBy[] = ['name', 'created_at', 'updated_at', 'popularity', 'deployments', 'interactions', 'relevance', 'downloads'];
 
   return {
     query,
@@ -90,13 +100,8 @@ function getInitialFilters(searchParams: URLSearchParams): ContractsUiFilters {
     author: searchParams.get('author') || '',
     networks,
     verified_only: searchParams.get('verified_only') === 'true',
-    sort_by:
-      sortBy === 'name' ||
-      sortBy === 'created_at' ||
-      sortBy === 'popularity' ||
-      sortBy === 'downloads'
-        ? sortBy
-        : 'created_at',
+    sort_by: validSortBys.includes(sortBy) ? sortBy : (query ? 'relevance' : 'created_at'),
+    sort_order: sortOrder === 'asc' || sortOrder === 'desc' ? sortOrder : 'desc',
     page: Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1,
     page_size: DEFAULT_PAGE_SIZE,
   };
@@ -125,7 +130,8 @@ export function ContractsContent() {
     filters.networks.forEach((network) => params.append('network', network));
     if (filters.author) params.set('author', filters.author);
     if (filters.verified_only) params.set('verified_only', 'true');
-    if (filters.sort_by !== 'created_at') params.set('sort_by', filters.sort_by);
+    if (filters.sort_by) params.set('sort_by', filters.sort_by);
+    if (filters.sort_order) params.set('sort_order', filters.sort_order);
     if (filters.page > 1) params.set('page', String(filters.page));
     params.set('page_size', String(filters.page_size));
 
@@ -142,7 +148,7 @@ export function ContractsContent() {
       networks: filters.networks.length > 0 ? filters.networks : undefined,
       verified_only: filters.verified_only,
       sort_by: filters.sort_by,
-      sort_order: filters.sort_by === 'name' ? 'asc' : 'desc',
+      sort_order: filters.sort_order,
       page: filters.page,
       page_size: filters.page_size,
     }),
@@ -197,6 +203,7 @@ export function ContractsContent() {
       networks: [],
       verified_only: false,
       sort_by: 'created_at',
+      sort_order: 'desc',
       page: 1,
     }));
 
@@ -267,11 +274,11 @@ export function ContractsContent() {
       });
     }
 
-    if (filters.sort_by !== 'created_at') {
+    if (filters.sort_by !== 'created_at' || filters.sort_order !== 'desc') {
       chips.push({
         id: 'sort',
-        label: `Sort: ${filters.sort_by.replace('_', ' ')}`,
-        onRemove: () => setFilters((current) => ({ ...current, sort_by: 'created_at' })),
+        label: `Sort: ${filters.sort_by.replace('_', ' ')} (${filters.sort_order})`,
+        onRemove: () => setFilters((current) => ({ ...current, sort_by: 'created_at', sort_order: 'desc' })),
       });
     }
 
@@ -320,15 +327,15 @@ export function ContractsContent() {
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <div className="mb-8">
-        <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-2">
+        <h1 className="text-4xl font-bold mb-2">
           Browse Contracts
         </h1>
-        <p className="text-gray-600 dark:text-gray-400">
+        <p className="text-muted-foreground">
           Discover verified Soroban smart contracts on the Stellar network
         </p>
       </div>
 
-      <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-6 mb-8">
+      <div className="bg-background rounded-xl border border-border p-6 mb-8 shadow-sm">
         <div className="flex flex-col gap-4">
           <SearchBar
             value={filters.query}
@@ -348,21 +355,32 @@ export function ContractsContent() {
               onChange={(value) =>
                 setFilters((current) => ({ ...current, sort_by: value, page: 1 }))
               }
+              showRelevance={!!filters.query}
             />
+
+            <select
+              value={filters.sort_order}
+              onChange={(e) => setFilters(prev => ({ ...prev, sort_order: e.target.value as 'asc' | 'desc', page: 1 }))}
+              className="px-3 py-2 rounded-lg border border-border bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
+            >
+              <option value="desc">Descending</option>
+              <option value="asc">Ascending</option>
+            </select>
+
             <button
               type="button"
               onClick={() => setMobileFiltersOpen(true)}
-              className="md:hidden inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 text-sm text-gray-700 dark:text-gray-300"
+              className="md:hidden inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-border text-sm text-foreground hover:bg-accent transition-colors"
             >
               <SlidersHorizontal className="w-4 h-4" />
               Filters
             </button>
-            <div className="hidden md:flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+            <div className="hidden md:flex items-center gap-2 text-sm text-muted-foreground">
               <Filter className="w-4 h-4" />
               Advanced filters
             </div>
             {isFetching && !isLoading && (
-              <span className="text-xs text-gray-500 dark:text-gray-400">
+              <span className="text-xs text-muted-foreground">
                 Updating results...
               </span>
             )}
@@ -371,20 +389,20 @@ export function ContractsContent() {
           <ActiveFilters chips={activeFilterChips} onClearAll={clearAllFilters} />
         </div>
 
-        <div className="hidden md:block mt-6 border-t border-gray-200 dark:border-gray-800 pt-6">
+        <div className="hidden md:block mt-6 border-t border-border pt-6">
           {filterPanel}
         </div>
       </div>
 
       {mobileFiltersOpen && (
-        <div className="md:hidden fixed inset-0 z-50 bg-black/40">
-          <div className="absolute right-0 top-0 h-full w-[88%] max-w-sm bg-white dark:bg-gray-900 border-l border-gray-200 dark:border-gray-800 p-5 overflow-y-auto">
+        <div className="md:hidden fixed inset-0 z-50 bg-black/60 backdrop-blur-sm">
+          <div className="absolute right-0 top-0 h-full w-[88%] max-w-sm bg-background border-l border-border p-5 shadow-2xl animate-in slide-in-from-right duration-300">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Filters</h2>
+              <h2 className="text-lg font-semibold">Filters</h2>
               <button
                 type="button"
                 onClick={() => setMobileFiltersOpen(false)}
-                className="p-1 rounded-md text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+                className="p-1 rounded-md text-muted-foreground hover:text-foreground transition-colors"
                 aria-label="Close filters"
               >
                 <X className="w-5 h-5" />
@@ -394,7 +412,7 @@ export function ContractsContent() {
             <button
               type="button"
               onClick={() => setMobileFiltersOpen(false)}
-              className="mt-6 w-full px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700"
+              className="mt-6 w-full px-4 py-2 rounded-lg bg-primary text-primary-foreground hover:opacity-90 transition-opacity font-medium"
             >
               Show results
             </button>
@@ -403,9 +421,16 @@ export function ContractsContent() {
       )}
 
       {isLoading ? (
-        <div className="text-center py-12">
-          <div className="inline-block w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
-        </div>
+        <>
+          <div className="mb-4">
+            <div className="h-6 w-48 bg-gray-200 dark:bg-gray-800 rounded animate-pulse" />
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <ContractCardSkeleton key={i} />
+            ))}
+          </div>
+        </>
       ) : data && data.items.length > 0 ? (
         <>
           <div className="mb-4">
@@ -413,7 +438,7 @@ export function ContractsContent() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
-            {data.items.map((contract) => (
+            {data.items.map((contract: Contract) => (
               <ContractCard key={contract.id} contract={contract} />
             ))}
           </div>
@@ -425,12 +450,12 @@ export function ContractsContent() {
                   setFilters((current) => ({ ...current, page: Math.max(1, current.page - 1) }))
                 }
                 disabled={filters.page <= 1}
-                className="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                className="px-4 py-2 rounded-lg border border-border text-foreground disabled:opacity-50 disabled:cursor-not-allowed hover:bg-accent transition-colors"
               >
                 Previous
               </button>
 
-              <span className="text-sm text-gray-600 dark:text-gray-400">
+              <span className="text-sm text-muted-foreground">
                 Page {filters.page} of {data.total_pages}
               </span>
 
@@ -439,7 +464,7 @@ export function ContractsContent() {
                   setFilters((current) => ({ ...current, page: current.page + 1 }))
                 }
                 disabled={filters.page >= data.total_pages}
-                className="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                className="px-4 py-2 rounded-lg border border-border text-foreground disabled:opacity-50 disabled:cursor-not-allowed hover:bg-accent transition-colors"
               >
                 Next
               </button>
@@ -447,13 +472,14 @@ export function ContractsContent() {
           )}
         </>
       ) : (
-        <div className="text-center py-12 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800">
-          <Package className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-          <p className="text-gray-600 dark:text-gray-400 mb-4">
+        <div className="text-center py-12 bg-background rounded-xl border border-border shadow-sm">
+          <Package className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+          <p className="text-muted-foreground mb-4">
             No contracts found for the selected filters
           </p>
           <button
             type="button"
+<<<<<<< HEAD
             onClick={() => {
               logEvent('search_performed', {
                 keyword: '',
@@ -462,6 +488,10 @@ export function ContractsContent() {
               clearAllFilters();
             }}
             className="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+=======
+            onClick={clearAllFilters}
+            className="px-4 py-2 rounded-lg border border-border text-foreground hover:bg-accent transition-colors"
+>>>>>>> bf33e5b9ccbaba0b83d5ef0ac28d977a2cdc6198
           >
             Clear all filters
           </button>

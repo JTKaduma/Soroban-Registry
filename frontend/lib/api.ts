@@ -21,6 +21,7 @@ export interface Contract {
   downloads?: number;
   created_at: string;
   updated_at: string;
+  is_maintenance?: boolean;
 }
 
 export interface ContractHealth {
@@ -71,6 +72,13 @@ export interface DependencyTreeNode {
   dependencies: DependencyTreeNode[];
 }
 
+export interface MaintenanceWindow {
+  message: string;
+  scheduled_end_at?: string;
+}
+
+export type MaturityLevel = 'alpha' | 'beta' | 'stable' | 'mature' | 'legacy';
+
 export interface ContractSearchParams {
   query?: string;
   network?: "mainnet" | "testnet" | "futurenet";
@@ -81,11 +89,12 @@ export interface ContractSearchParams {
   language?: string;
   languages?: string[];
   author?: string;
-  sort_by?: "name" | "created_at" | "popularity" | "downloads";
-  sort_order?: "asc" | "desc";
   tags?: string[];
+  maturity?: 'alpha' | 'beta' | 'stable' | 'mature' | 'legacy';
   page?: number;
   page_size?: number;
+  sort_by?: 'name' | 'created_at' | 'updated_at' | 'popularity' | 'deployments' | 'interactions' | 'relevance' | 'downloads';
+  sort_order?: 'asc' | 'desc';
 }
 
 export interface PublishRequest {
@@ -97,6 +106,20 @@ export interface PublishRequest {
   tags: string[];
   source_url?: string;
   publisher_address: string;
+}
+
+export type DeprecationStatus = 'active' | 'deprecated' | 'retired';
+
+export interface DeprecationInfo {
+  contract_id: string;
+  status: DeprecationStatus;
+  deprecated_at?: string | null;
+  retirement_at?: string | null;
+  replacement_contract_id?: string | null;
+  migration_guide_url?: string | null;
+  notes?: string | null;
+  days_remaining?: number | null;
+  dependents_notified: number;
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
@@ -309,6 +332,12 @@ export const api = {
     return response.json();
   },
 
+  async getContractDependencies(id: string): Promise<DependencyTreeNode[]> {
+    const response = await fetch(`${API_URL}/api/contracts/${id}/dependencies`);
+    if (!response.ok) throw new Error('Failed to fetch contract dependencies');
+    return response.json();
+  },
+
   async publishContract(data: PublishRequest): Promise<Contract> {
     if (USE_MOCKS) {
       if (typeof window !== "undefined") {
@@ -358,6 +387,48 @@ export const api = {
     return response.json();
   },
 
+  async getDeprecationInfo(id: string): Promise<DeprecationInfo> {
+    if (USE_MOCKS) {
+      return Promise.resolve({
+        contract_id: id,
+        status: 'deprecated',
+        deprecated_at: new Date(Date.now() - 86400000 * 7).toISOString(),
+        retirement_at: new Date(Date.now() + 86400000 * 30).toISOString(),
+        replacement_contract_id: 'c2',
+        migration_guide_url: 'https://example.com/migration',
+        notes: 'This contract is being retired. Migrate to the new liquidity pool contract.',
+        days_remaining: 30,
+        dependents_notified: 4,
+      });
+    }
+
+    const response = await fetch(`${API_URL}/api/contracts/${id}/deprecation-info`);
+    if (!response.ok) throw new Error('Failed to fetch deprecation info');
+    return response.json();
+  },
+
+  async getFormalVerificationResults(id: string): Promise<FormalVerificationReport[]> {
+    if (USE_MOCKS) {
+      return Promise.resolve([]);
+    }
+    const response = await fetch(`${API_URL}/api/contracts/${id}/formal-verification`);
+    if (!response.ok) throw new Error('Failed to fetch formal verification results');
+    return response.json();
+  },
+
+  async runFormalVerification(id: string, data: RunVerificationRequest): Promise<FormalVerificationReport> {
+    if (USE_MOCKS) {
+      throw new Error('Formal verification is not supported in mock mode');
+    }
+    const response = await fetch(`${API_URL}/api/contracts/${id}/formal-verification`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) throw new Error('Failed to run formal verification');
+    return response.json();
+  },
+
   // Publisher endpoints
   async getPublisher(id: string): Promise<Publisher> {
     if (USE_MOCKS) {
@@ -404,15 +475,51 @@ export const api = {
     return response.json();
   },
 
+  // Compatibility endpoints
+  async getCompatibility(id: string): Promise<CompatibilityMatrix> {
+    const response = await fetch(`${API_URL}/api/contracts/${id}/compatibility`);
+    if (!response.ok) throw new Error('Failed to fetch compatibility matrix');
+    return response.json();
+  },
+
+  async addCompatibility(id: string, data: AddCompatibilityRequest): Promise<unknown> {
+    const response = await fetch(`${API_URL}/api/contracts/${id}/compatibility`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) throw new Error('Failed to add compatibility entry');
+    return response.json();
+  },
+
+  getCompatibilityExportUrl(id: string, format: 'csv' | 'json'): string {
+    return `${API_URL}/api/contracts/${id}/compatibility/export?format=${format}`;
+  },
+
   // Graph endpoint
   async getContractGraph(network?: string): Promise<GraphResponse> {
     const queryParams = new URLSearchParams();
     if (network) queryParams.append("network", network);
     const qs = queryParams.toString();
+<<<<<<< HEAD
     const response = await fetch(
       `${API_URL}/api/contracts/graph${qs ? `?${qs}` : ""}`,
     );
+=======
+
+    const response = await fetch(`${API_URL}/api/contracts/graph${qs ? `?${qs}` : ""}`);
+>>>>>>> bf33e5b9ccbaba0b83d5ef0ac28d977a2cdc6198
     if (!response.ok) throw new Error("Failed to fetch contract graph");
+    return response.json();
+  },
+
+  async getTemplates(): Promise<Template[]> {
+    if (USE_MOCKS) {
+      return Promise.resolve([]);
+    }
+    const response = await fetch(`${API_URL}/api/templates`);
+    if (!response.ok) throw new Error('Failed to fetch templates');
+
     return response.json();
   },
 };
@@ -455,6 +562,7 @@ export interface GraphResponse {
   edges: GraphEdge[];
 }
 
+
 export interface ContractExample {
   id: string;
   contract_id: string;
@@ -475,4 +583,77 @@ export interface ExampleRating {
   user_address: string;
   rating: number;
   created_at: string;
+}
+
+// ─── Compatibility Matrix ────────────────────────────────────────────────────
+
+export interface CompatibilityEntry {
+  target_contract_id: string;
+  target_contract_stellar_id: string;
+  target_contract_name: string;
+  target_version: string;
+  stellar_version?: string;
+  is_compatible: boolean;
+}
+
+/** Shape returned by GET /api/contracts/:id/compatibility */
+export interface CompatibilityMatrix {
+  contract_id: string;
+  /** Keyed by source version string */
+  versions: Record<string, CompatibilityEntry[]>;
+  warnings: string[];
+  total_entries: number;
+}
+
+export interface AddCompatibilityRequest {
+  source_version: string;
+  target_contract_id: string;
+  target_version: string;
+  stellar_version?: string;
+  is_compatible: boolean;
+}
+
+// ─── Formal Verification ─────────────────────────────────────────────────────
+
+export type VerificationStatus = 'Proved' | 'Violated' | 'Unknown' | 'Skipped';
+
+export interface FormalVerificationSession {
+  id: string;
+  contract_id: string;
+  version: string;
+  verifier_version: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FormalVerificationProperty {
+  id: string;
+  session_id: string;
+  property_id: string;
+  description?: string;
+  invariant: string;
+  severity: string;
+}
+
+export interface FormalVerificationResult {
+  id: string;
+  property_id: string;
+  status: VerificationStatus;
+  counterexample?: string;
+  details?: string;
+}
+
+export interface FormalVerificationPropertyResult {
+  property: FormalVerificationProperty;
+  result: FormalVerificationResult;
+}
+
+export interface FormalVerificationReport {
+  session: FormalVerificationSession;
+  properties: FormalVerificationPropertyResult[];
+}
+
+export interface RunVerificationRequest {
+  properties_file: string;
+  verifier_version?: string;
 }

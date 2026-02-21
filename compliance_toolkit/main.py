@@ -76,7 +76,7 @@ def main(argv=None):
     pc = sub.add_parser('certify')
     pc.add_argument('--repo', help='Path to repository to audit')
     pc.add_argument('--out', help='Output zip file for certification packet')
-    pc = sub.add_parser('checklist')
+    pl = sub.add_parser('checklist')
 
     args = parser.parse_args(argv)
     if args.cmd == 'audit':

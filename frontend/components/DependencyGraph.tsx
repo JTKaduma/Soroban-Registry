@@ -1,148 +1,609 @@
 "use client";
 
-import { DependencyTreeNode } from "@/lib/api";
-import {
-  ChevronRight,
-  ChevronDown,
-  Box,
-  ShieldCheck,
-  AlertCircle,
-} from "lucide-react";
-import { useState } from "react";
+import * as d3 from "d3";
+import { useEffect, useRef, useCallback, forwardRef, useImperativeHandle, useState, useMemo } from "react";
+import type { GraphNode, GraphEdge } from "@/lib/api";
 
-interface DependencyNodeProps {
-  node: DependencyTreeNode;
-  depth?: number;
-  isLast?: boolean;
+// ─── Public handle type ──────────────────────────────────────────────────────
+export interface DependencyGraphHandle {
+  zoomIn: () => void;
+  zoomOut: () => void;
+  resetZoom: () => void;
+  exportSVG: () => void;
+  exportPNG: () => void;
+  focusOnNode: (id: string) => void;
+  panUp: () => void;
+  panDown: () => void;
+  panLeft: () => void;
+  panRight: () => void;
 }
 
-function DependencyNode({
-  node,
-  depth = 0,
-  isLast = false,
-}: DependencyNodeProps) {
-  const [isExpanded, setIsExpanded] = useState(true);
-  const hasChildren = node.dependencies && node.dependencies.length > 0;
-
-  // Indentation logic
-  const indentation = depth * 24;
-
-  return (
-    <div className="select-none">
-      <div
-        className={`
-          flex items-center gap-2 py-2 px-3 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800/50 
-          transition-colors border-l-2
-          ${depth === 0 ? "border-primary-500 bg-primary-50/10" : "border-transparent"}
-        `}
-        style={{ marginLeft: `${indentation}px` }}
-      >
-        <button
-          onClick={() => hasChildren && setIsExpanded(!isExpanded)}
-          className={`
-            p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors
-            ${!hasChildren ? "invisible" : ""}
-          `}
-        >
-          {isExpanded ? (
-            <ChevronDown className="w-4 h-4 text-gray-500" />
-          ) : (
-            <ChevronRight className="w-4 h-4 text-gray-500" />
-          )}
-        </button>
-
-        <div className="flex items-center gap-2">
-          <Box className="w-4 h-4 text-blue-500" />
-          <span className="font-medium text-gray-900 dark:text-gray-100">
-            {node.name}
-          </span>
-        </div>
-
-        <div className="flex items-center gap-2 ml-2">
-          <span className="text-xs font-mono px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700">
-            {node.constraint_to_parent}
-          </span>
-
-          {node.contract_id === "unknown" ? (
-            <span
-              className="flex items-center gap-1 text-xs text-red-500"
-              title="Contract not found in registry"
-            >
-              <AlertCircle className="w-3 h-3" />
-              Unresolved
-            </span>
-          ) : (
-            <span
-              className="flex items-center gap-1 text-xs text-green-600 dark:text-green-500"
-              title="Resolved"
-            >
-              <ShieldCheck className="w-3 h-3" />
-            </span>
-          )}
-        </div>
-      </div>
-
-      {isExpanded && hasChildren && (
-        <div className="relative">
-          {/* Vertical connector line could go here */}
-          {node.dependencies.map((child, index) => (
-            <DependencyNode
-              key={`${child.contract_id}-${index}`}
-              node={child}
-              depth={depth + 1}
-              isLast={index === node.dependencies.length - 1}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
+// ─── D3 internal node type ────────────────────────────────────────────────────
+interface SimNode extends d3.SimulationNodeDatum {
+  id: string;
+  data: GraphNode;
+  radius: number;
 }
 
+interface SimLink extends d3.SimulationLinkDatum<SimNode> {
+  data: GraphEdge;
+}
+
+// ─── Colour helpers ───────────────────────────────────────────────────────────
+const NETWORK_COLOR: Record<string, string> = {
+  mainnet: "#22c55e",
+  testnet: "#3b82f6",
+  futurenet: "#a855f7",
+};
+
+function nodeColor(node: GraphNode): string {
+  return NETWORK_COLOR[node.network] ?? "#6b7280";
+}
+
+// ─── Props ────────────────────────────────────────────────────────────────────
 interface DependencyGraphProps {
-  dependencies: DependencyTreeNode[];
-  isLoading?: boolean;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  searchQuery?: string;
+  dependentCounts?: Map<string, number>;
+  onNodeClick?: (node: GraphNode | null) => void;
+  selectedNode?: GraphNode | null;
 }
 
-export default function DependencyGraph({
-  dependencies,
-  isLoading,
-}: DependencyGraphProps) {
-  if (isLoading) {
+// ─── Tooltip state ────────────────────────────────────────────────────────────
+interface TooltipState {
+  x: number;
+  y: number;
+  node: GraphNode;
+  dependents: number;
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
+const DependencyGraph = forwardRef<DependencyGraphHandle, DependencyGraphProps>(
+  function DependencyGraph(
+    { nodes, edges, searchQuery = "", dependentCounts = new Map(), onNodeClick, selectedNode },
+    ref
+  ) {
+    const svgRef = useRef<SVGSVGElement>(null);
+    const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
+    const gRef = useRef<d3.Selection<SVGGElement, unknown, null, undefined> | null>(null);
+    const [tooltip, setTooltip] = useState<TooltipState | null>(null);
+    const containerRef = useRef<HTMLDivElement>(null);
+    // Pinned node IDs — their fx/fy are kept fixed in the simulation
+    const [, setPinnedNodes] = useState<Set<string>>(new Set());
+    const pinnedRef = useRef<Set<string>>(new Set());
+
+    // ── Large-graph performance flags ─────────────────────────────────────────
+    const isLargeGraph = nodes.length > 200;
+    const isVeryLargeGraph = nodes.length > 500;
+
+    // ── Zoom helpers ────────────────────────────────────────────────────────
+    const getZoom = useCallback(() => zoomRef.current, []);
+    const getSvg = useCallback(() => svgRef.current ? d3.select(svgRef.current) : null, []);
+
+    const zoomBy = useCallback((factor: number) => {
+      const svg = getSvg();
+      const z = getZoom();
+      if (!svg || !z) return;
+      svg.transition().duration(250).call(z.scaleBy, factor);
+    }, [getSvg, getZoom]);
+
+    const panBy = useCallback((dx: number, dy: number) => {
+      const svg = getSvg();
+      const z = getZoom();
+      if (!svg || !z) return;
+      svg.transition().duration(150).call(z.translateBy, dx, dy);
+    }, [getSvg, getZoom]);
+
+    // ── Imperative handle ────────────────────────────────────────────────────
+    useImperativeHandle(ref, () => ({
+      zoomIn: () => zoomBy(1.3),
+      zoomOut: () => zoomBy(1 / 1.3),
+      resetZoom: () => {
+        const svg = getSvg();
+        const z = getZoom();
+        if (!svg || !z) return;
+        const rect = svgRef.current!.getBoundingClientRect();
+        svg.transition().duration(400).call(
+          z.transform,
+          d3.zoomIdentity.translate(rect.width / 2, rect.height / 2).scale(1)
+        );
+      },
+      focusOnNode: (id: string) => {
+        const svg = getSvg();
+        const z = getZoom();
+        if (!svg || !z || !svgRef.current) return;
+        const gEl = gRef.current;
+        if (!gEl) return;
+        const circle = gEl.select<SVGCircleElement>(`circle[data-id="${id}"]`);
+        if (circle.empty()) return;
+        const cx = parseFloat(circle.attr("cx") || "0");
+        const cy = parseFloat(circle.attr("cy") || "0");
+        const rect = svgRef.current.getBoundingClientRect();
+        svg.transition().duration(400).call(
+          z.transform,
+          d3.zoomIdentity
+            .translate(rect.width / 2 - cx * 1.5, rect.height / 2 - cy * 1.5)
+            .scale(1.5)
+        );
+      },
+      exportSVG: () => {
+        if (!svgRef.current) return;
+        const serializer = new XMLSerializer();
+        const source = serializer.serializeToString(svgRef.current);
+        const blob = new Blob([source], { type: "image/svg+xml" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "dependency-graph.svg";
+        a.click();
+        URL.revokeObjectURL(url);
+      },
+      exportPNG: () => {
+        if (!svgRef.current) return;
+        const serializer = new XMLSerializer();
+        const source = serializer.serializeToString(svgRef.current);
+        const img = new Image();
+        const svg = svgRef.current;
+        img.onload = () => {
+          const canvas = document.createElement("canvas");
+          canvas.width = svg.clientWidth || 1200;
+          canvas.height = svg.clientHeight || 800;
+          const ctx = canvas.getContext("2d")!;
+          ctx.fillStyle = "#030712";
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(img, 0, 0);
+          const a = document.createElement("a");
+          a.href = canvas.toDataURL("image/png");
+          a.download = "dependency-graph.png";
+          a.click();
+        };
+        const utf8Bytes = new TextEncoder().encode(source);
+        const binaryString = utf8Bytes.reduce((data, byte) => data + String.fromCharCode(byte), "");
+        const base64Svg = btoa(binaryString);
+        img.src = "data:image/svg+xml;base64," + base64Svg;
+      },
+      panUp: () => panBy(0, -60),
+      panDown: () => panBy(0, 60),
+      panLeft: () => panBy(-60, 0),
+      panRight: () => panBy(60, 0),
+    }));
+
+    // ── D3 force simulation ────────────────────────────────────────────────
+    useEffect(() => {
+      if (!svgRef.current) return;
+
+      const svgEl = svgRef.current;
+      const rect = svgEl.getBoundingClientRect();
+      const W = rect.width || 1000;
+      const H = rect.height || 700;
+
+      // Clear previous render
+      d3.select(svgEl).selectAll("*").remove();
+
+      const svg = d3.select(svgEl)
+        .attr("width", W)
+        .attr("height", H);
+
+      // ── Arrow marker ──
+      svg.append("defs").append("marker")
+        .attr("id", "arrow")
+        .attr("viewBox", "0 -5 10 10")
+        .attr("refX", 18)
+        .attr("refY", 0)
+        .attr("markerWidth", 5)
+        .attr("markerHeight", 5)
+        .attr("orient", "auto")
+        .append("path")
+        .attr("d", "M0,-5L10,0L0,5")
+        .attr("fill", "#4b5563");
+
+      // ── Root group (zoom target) ──
+      const g = svg.append("g").attr("class", "graph-root");
+      gRef.current = g;
+
+      // ── Zoom ──
+      const zoom = d3.zoom<SVGSVGElement, unknown>()
+        .scaleExtent([0.05, 8])
+        .on("zoom", (event) => {
+          g.attr("transform", event.transform.toString());
+        });
+
+      zoomRef.current = zoom;
+      svg.call(zoom).on("dblclick.zoom", null);
+
+      // ── Build sim nodes/links ──
+      const simNodes: SimNode[] = nodes.map((n) => {
+        const deps = dependentCounts.get(n.id) ?? 0;
+        const radius = Math.max(6, Math.min(22, 8 + deps * 1.5));
+        return { id: n.id, data: n, radius };
+      });
+
+      const nodeById = new Map(simNodes.map((n) => [n.id, n]));
+
+      const simLinks: SimLink[] = edges
+        .filter((e) => nodeById.has(e.source) && nodeById.has(e.target))
+        .map((e) => ({
+          source: nodeById.get(e.source)!,
+          target: nodeById.get(e.target)!,
+          data: e,
+        }));
+
+      // ── Force simulation ──
+      const simulation = d3.forceSimulation<SimNode>(simNodes)
+        .force("link", d3.forceLink<SimNode, SimLink>(simLinks)
+          .id((d) => d.id)
+          .distance(isLargeGraph ? 50 : 80)
+          .strength(0.4))
+        .force("charge", d3.forceManyBody()
+          .strength(isVeryLargeGraph ? -60 : isLargeGraph ? -120 : -180)
+          .distanceMax(isLargeGraph ? 200 : 400))
+        .force("center", d3.forceCenter(0, 0))
+        .force("collision", d3.forceCollide<SimNode>().radius((d) => d.radius + (isLargeGraph ? 2 : 4)))
+        // Faster convergence for large graphs — fewer ticks means lower CPU cost
+        .alphaDecay(isVeryLargeGraph ? 0.06 : isLargeGraph ? 0.04 : 0.025)
+        // Stop simulation once sufficiently stable
+        .alphaMin(0.001);
+
+      // ── Edges ──
+      const linkGroup = g.append("g").attr("class", "links");
+      const linkEls = linkGroup.selectAll<SVGLineElement, SimLink>("line")
+        .data(simLinks)
+        .join("line")
+        .attr("class", "graph-edge")
+        .attr("stroke", "#374151")
+        .attr("stroke-width", isLargeGraph ? 0.8 : 1.5)
+        .attr("stroke-opacity", isLargeGraph ? 0.35 : 0.6)
+        // Skip arrows on very large graphs — avoids thousands of marker lookups
+        .attr("marker-end", isVeryLargeGraph ? null : "url(#arrow)");
+
+      // ── Nodes (group containing circle + text) ──
+      const nodeGroup = g.append("g").attr("class", "nodes");
+      const nodeEls = nodeGroup.selectAll<SVGGElement, SimNode>("g.node")
+        .data(simNodes, (d) => d.id)
+        .join("g")
+        .attr("class", "node")
+        .style("cursor", "pointer");
+
+      // Circle
+      nodeEls.append("circle")
+        .attr("r", (d) => d.radius)
+        .attr("data-id", (d) => d.id)
+        .attr("fill", (d) => nodeColor(d.data))
+        .attr("fill-opacity", 0.85)
+        .attr("stroke", (d) => {
+          const deps = dependentCounts.get(d.id) ?? 0;
+          return deps >= 5 ? "#f59e0b" : "transparent";
+        })
+        .attr("stroke-width", 2.5);
+
+      // Label — skip for large graphs to reduce DOM size significantly
+      if (!isLargeGraph) {
+        nodeEls.append("text")
+          .attr("dy", (d) => d.radius + 12)
+          .attr("text-anchor", "middle")
+          .attr("fill", "#d1d5db")
+          .attr("font-size", "10px")
+          .attr("pointer-events", "none")
+          .text((d) => d.data.name.length > 14 ? d.data.name.slice(0, 13) + "…" : d.data.name);
+      }
+
+      // ── Drag: release non-pinned nodes, keep pinned fixed ──
+      const drag = d3.drag<SVGGElement, SimNode>()
+        .on("start", (event, d) => {
+          if (!event.active) simulation.alphaTarget(0.3).restart();
+          d.fx = d.x;
+          d.fy = d.y;
+        })
+        .on("drag", (event, d) => {
+          d.fx = event.x;
+          d.fy = event.y;
+        })
+        .on("end", (event, d) => {
+          if (!event.active) simulation.alphaTarget(0);
+          // Only release if NOT pinned
+          if (!pinnedRef.current.has(d.id)) {
+            d.fx = null;
+            d.fy = null;
+          }
+        });
+
+      // ── Pin indicator (small cross symbol) ──
+      const pinGroup = nodeEls.append("g")
+        .attr("class", "pin-indicator")
+        .attr("pointer-events", "none")
+        .attr("display", "none");
+
+      pinGroup.append("circle")
+        .attr("r", 5)
+        .attr("cx", (d) => d.radius - 4)
+        .attr("cy", -6)
+        .attr("fill", "#f97316")
+        .attr("stroke", "#1f2937")
+        .attr("stroke-width", 1.5);
+
+      pinGroup.append("text")
+        .attr("x", (d) => d.radius - 4)
+        .attr("y", -3)
+        .attr("text-anchor", "middle")
+        .attr("fill", "white")
+        .attr("font-size", "7px")
+        .attr("font-weight", "bold")
+        .attr("pointer-events", "none")
+        .text("P");
+
+      nodeEls.call(drag as unknown as (selection: d3.Selection<SVGGElement, SimNode, SVGGElement, unknown>) => void);
+
+      // ── Tooltip + edge-hover highlight ──
+      nodeEls.on("mouseenter", (event: MouseEvent, d) => {
+        const svgRect = svgEl.getBoundingClientRect();
+        setTooltip({
+          x: event.clientX - svgRect.left,
+          y: event.clientY - svgRect.top,
+          node: d.data,
+          dependents: dependentCounts.get(d.id) ?? 0,
+        });
+
+        // Skip edge dimming if a node is already selected (selection handles it)
+        if (!selectedNode) {
+          const connected = new Set<string>([d.id]);
+          linkEls.each(function (ld) {
+            const src = (ld.source as SimNode).id;
+            const tgt = (ld.target as SimNode).id;
+            if (src === d.id || tgt === d.id) {
+              connected.add(src);
+              connected.add(tgt);
+            }
+          });
+
+          linkEls
+            .attr("stroke-opacity", (ld) => {
+              const src = (ld.source as SimNode).id;
+              const tgt = (ld.target as SimNode).id;
+              return (src === d.id || tgt === d.id) ? 0.9 : 0.05;
+            })
+            .attr("stroke", (ld) => {
+              const src = (ld.source as SimNode).id;
+              const tgt = (ld.target as SimNode).id;
+              return (src === d.id || tgt === d.id) ? "#60a5fa" : "#374151";
+            });
+
+          nodeEls.attr("opacity", (nd) => connected.has(nd.id) ? 1 : 0.2);
+        }
+      });
+
+      nodeEls.on("mousemove", (event: MouseEvent) => {
+        const svgRect = svgEl.getBoundingClientRect();
+        setTooltip((prev) => prev ? { ...prev, x: event.clientX - svgRect.left, y: event.clientY - svgRect.top } : null);
+      });
+
+      nodeEls.on("mouseleave", () => {
+        setTooltip(null);
+        if (!selectedNode) {
+          linkEls
+            .attr("stroke-opacity", isLargeGraph ? 0.35 : 0.6)
+            .attr("stroke", "#374151");
+          nodeEls.attr("opacity", 1);
+        }
+      });
+
+      // ── Click: select node ──
+      nodeEls.on("click", (event: MouseEvent, d) => {
+        event.stopPropagation();
+        onNodeClick?.(d.data);
+      });
+
+      // ── Double-click: pin / unpin node ──
+      nodeEls.on("dblclick", (event: MouseEvent, d) => {
+        event.stopPropagation();
+        const isPinned = pinnedRef.current.has(d.id);
+        if (isPinned) {
+          // Unpin: release from fixed position
+          pinnedRef.current.delete(d.id);
+          d.fx = null;
+          d.fy = null;
+          // Hide pin indicator
+          d3.select(event.currentTarget as SVGGElement)
+            .select(".pin-indicator")
+            .attr("display", "none");
+        } else {
+          // Pin: lock current position
+          pinnedRef.current.add(d.id);
+          d.fx = d.x;
+          d.fy = d.y;
+          // Show pin indicator
+          d3.select(event.currentTarget as SVGGElement)
+            .select(".pin-indicator")
+            .attr("display", null);
+        }
+        // Sync React state for hint text
+        setPinnedNodes(new Set(pinnedRef.current));
+        simulation.alphaTarget(0.1).restart();
+      });
+
+      svg.on("click", () => onNodeClick?.(null));
+
+      // ── Tick ──
+      simulation.on("tick", () => {
+        linkEls
+          .attr("x1", (d) => (d.source as SimNode).x ?? 0)
+          .attr("y1", (d) => (d.source as SimNode).y ?? 0)
+          .attr("x2", (d) => (d.target as SimNode).x ?? 0)
+          .attr("y2", (d) => (d.target as SimNode).y ?? 0);
+
+        nodeEls.attr("transform", (d) => `translate(${d.x ?? 0},${d.y ?? 0})`);
+        nodeEls.select("circle")
+          .attr("cx", 0)
+          .attr("cy", 0);
+      });
+
+      // Initial zoom-to-fit after simulation stabilises a bit
+      const initialZoomTimer = setTimeout(() => {
+        const rect2 = svgEl.getBoundingClientRect();
+        svg.call(
+          zoom.transform,
+          d3.zoomIdentity.translate(rect2.width / 2, rect2.height / 2).scale(
+            Math.min(1, Math.max(0.05, 5 / Math.sqrt(simNodes.length + 1)))
+          )
+        );
+      }, isVeryLargeGraph ? 1500 : isLargeGraph ? 900 : 600);
+
+      // Responsive resize — update SVG dimensions on container resize
+      let resizeObserver: ResizeObserver | null = null;
+      if (typeof ResizeObserver !== "undefined") {
+        resizeObserver = new ResizeObserver((entries) => {
+          for (const entry of entries) {
+            const { width, height } = entry.contentRect;
+            d3.select(svgEl).attr("width", width).attr("height", height);
+          }
+        });
+        if (containerRef.current) resizeObserver.observe(containerRef.current);
+      }
+
+      return () => {
+        clearTimeout(initialZoomTimer);
+        resizeObserver?.disconnect();
+        simulation.stop();
+        d3.select(svgEl).selectAll("*").remove();
+      };
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [nodes, edges, dependentCounts, isLargeGraph, isVeryLargeGraph]);
+
+    // ── Highlight selected node & neighbours ────────────────────────────────
+    useEffect(() => {
+      const g = gRef.current;
+      if (!g) return;
+
+      if (!selectedNode) {
+        // Clear all dim/highlight
+        g.selectAll<SVGGElement, SimNode>("g.node")
+          .attr("opacity", 1);
+        g.selectAll<SVGLineElement, SimLink>("line.graph-edge")
+          .attr("opacity", 0.6)
+          .attr("stroke", "#374151");
+        return;
+      }
+
+      const neighbourIds = new Set<string>([selectedNode.id]);
+      g.selectAll<SVGLineElement, SimLink>("line.graph-edge").each(function (d) {
+        const src = (d.source as SimNode).id;
+        const tgt = (d.target as SimNode).id;
+        if (src === selectedNode.id || tgt === selectedNode.id) {
+          neighbourIds.add(src);
+          neighbourIds.add(tgt);
+        }
+      });
+
+      g.selectAll<SVGGElement, SimNode>("g.node")
+        .attr("opacity", (d) => neighbourIds.has(d.id) ? 1 : 0.15);
+
+      g.selectAll<SVGLineElement, SimLink>("line.graph-edge")
+        .attr("opacity", (d) => {
+          const src = (d.source as SimNode).id;
+          const tgt = (d.target as SimNode).id;
+          return (src === selectedNode.id || tgt === selectedNode.id) ? 1 : 0.05;
+        })
+        .attr("stroke", (d) => {
+          const src = (d.source as SimNode).id;
+          const tgt = (d.target as SimNode).id;
+          return (src === selectedNode.id || tgt === selectedNode.id) ? "#60a5fa" : "#374151";
+        });
+    }, [selectedNode]);
+
+    // ── Search highlight ────────────────────────────────────────────────────
+    useEffect(() => {
+      const g = gRef.current;
+      if (!g) return;
+      if (!searchQuery) {
+        g.selectAll<SVGGElement, SimNode>("g.node").select("circle")
+          .attr("stroke-width", (d) => (dependentCounts.get(d.id) ?? 0) >= 5 ? 2.5 : 0)
+          .attr("stroke", (d) => (dependentCounts.get(d.id) ?? 0) >= 5 ? "#f59e0b" : "transparent");
+        return;
+      }
+      const q = searchQuery.toLowerCase();
+      g.selectAll<SVGGElement, SimNode>("g.node").select("circle")
+        .attr("stroke-width", (d) => {
+          const isMatch = d.data.name.toLowerCase().includes(q) || d.data.contract_id.toLowerCase().includes(q);
+          return isMatch ? 3 : ((dependentCounts.get(d.id) ?? 0) >= 5 ? 2.5 : 0);
+        })
+        .attr("stroke", (d) => {
+          const isMatch = d.data.name.toLowerCase().includes(q) || d.data.contract_id.toLowerCase().includes(q);
+          return isMatch ? "#facc15" : ((dependentCounts.get(d.id) ?? 0) >= 5 ? "#f59e0b" : "transparent");
+        });
+    }, [searchQuery, dependentCounts]);
+
+    // ── Empty / loading states ──────────────────────────────────────────────
+    if (nodes.length === 0) {
+      return (
+        <div className="w-full h-full flex items-center justify-center bg-gray-950">
+          <p className="text-gray-500 text-sm">No nodes to display.</p>
+        </div>
+      );
+    }
+
     return (
-      <div className="space-y-2 animate-pulse">
-        <div className="h-10 bg-gray-100 dark:bg-gray-800 rounded w-full" />
-        <div className="h-10 bg-gray-100 dark:bg-gray-800 rounded w-3/4 ml-6" />
-        <div className="h-10 bg-gray-100 dark:bg-gray-800 rounded w-1/2 ml-12" />
+      <div ref={containerRef} className="relative w-full h-full bg-gray-950">
+        <svg
+          ref={svgRef}
+          className="w-full h-full"
+          style={{ display: "block", touchAction: "none" }}
+        />
+
+        {/* Performance notice for very large graphs */}
+        {isVeryLargeGraph && (
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
+            <div className="bg-amber-900/80 backdrop-blur border border-amber-700/50 rounded-lg px-3 py-1.5 text-xs text-amber-200">
+              Large graph ({nodes.length.toLocaleString()} nodes) — labels hidden for performance
+            </div>
+          </div>
+        )}
+
+        {/* Tooltip */}
+        {tooltip && (
+          <div
+            className="pointer-events-none absolute z-40 bg-gray-900/95 backdrop-blur-xl border border-gray-700/60 rounded-xl px-3 py-2.5 shadow-2xl text-xs max-w-[220px]"
+            style={{
+              left: tooltip.x + 14,
+              top: tooltip.y - 10,
+              transform: tooltip.x > (containerRef.current?.clientWidth ?? 0) - 240
+                ? "translateX(-110%)"
+                : "none",
+            }}
+          >
+            <p className="font-semibold text-white mb-1 truncate">{tooltip.node.name}</p>
+            <p className="font-mono text-gray-500 truncate text-[10px] mb-1.5">
+              {tooltip.node.contract_id.slice(0, 12)}…
+            </p>
+            <div className="space-y-0.5">
+              <div className="flex justify-between gap-4">
+                <span className="text-gray-400">Network</span>
+                <span style={{ color: NETWORK_COLOR[tooltip.node.network] ?? "#9ca3af" }}>
+                  {tooltip.node.network}
+                </span>
+              </div>
+              {tooltip.node.category && (
+                <div className="flex justify-between gap-4">
+                  <span className="text-gray-400">Type</span>
+                  <span className="text-gray-200">{tooltip.node.category}</span>
+                </div>
+              )}
+              <div className="flex justify-between gap-4">
+                <span className="text-gray-400">Verified</span>
+                <span className={tooltip.node.is_verified ? "text-green-400" : "text-gray-500"}>
+                  {tooltip.node.is_verified ? "✓" : "—"}
+                </span>
+              </div>
+              <div className="flex justify-between gap-4">
+                <span className="text-gray-400">Dependents</span>
+                <span className="text-gray-200">{tooltip.dependents}</span>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
+);
 
-  if (!dependencies || dependencies.length === 0) {
-    return (
-      <div className="text-center py-8 text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-900/50 rounded-xl border border-dashed border-gray-200 dark:border-gray-800">
-        No dependencies declared
-      </div>
-    );
-  }
-
-  return (
-    <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden">
-      <div className="p-4 border-b border-gray-200 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900/50">
-        <h3 className="font-semibold text-gray-900 dark:text-white flex items-center gap-2">
-          <Box className="w-4 h-4" />
-          Dependency Graph
-        </h3>
-      </div>
-      <div className="p-4 overflow-x-auto">
-        {dependencies.map((rootNode, index) => (
-          <DependencyNode
-            key={`${rootNode.contract_id}-${index}`}
-            node={rootNode}
-            isLast={index === dependencies.length - 1}
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
+DependencyGraph.displayName = "DependencyGraph";
+export default DependencyGraph;

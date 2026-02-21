@@ -41,13 +41,7 @@ hex = { workspace = true }
 moka = { version = "0.12.13", features = ["future"] }
 async-trait = "0.1.89"
 lru = "0.16.3"
-rand = "0.8"
+ed25519-dalek = { version = "2.1", features = ["rand_core"] }
+jsonwebtoken = "9.3.0"
 regex = "1.10"
 lazy_static = "1.4"
-hex = "0.4"
-prometheus = { workspace = true }
-opentelemetry = { workspace = true }
-opentelemetry_sdk = { workspace = true }
-opentelemetry-otlp = { workspace = true }
-tracing-opentelemetry = { workspace = true }
-once_cell = { workspace = true }

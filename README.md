@@ -164,7 +164,26 @@ soroban-registry publish --contract-path ./my-contract
 
 # Verify a contract
 soroban-registry verify <contract-id> --source ./src
+
+# Preview a state migration (dry-run)
+soroban-registry migrate preview <old-id> <new-id>
+
+# Analyze schema differences
+soroban-registry migrate analyze <old-id> <new-id>
+
+# Generate migration template (Rust or JS)
+soroban-registry migrate generate <old-id> <new-id> --language rust
+soroban-registry migrate generate <old-id> <new-id> --language js
+
+# Validate, apply, rollback, and audit history
+soroban-registry migrate validate <old-id> <new-id>
+soroban-registry migrate apply <old-id> <new-id>
+soroban-registry migrate rollback <migration-id>
+soroban-registry migrate history --limit 20
 ```
+
+Migration commands read snapshots from `.soroban-registry/contracts/<contract-id>.json`
+and record all migration activity to `.soroban-registry/migration_history.jsonl`.
 
 ## 🔧 API Endpoints
 

@@ -86,15 +86,15 @@ impl CacheConfig {
 pub struct CacheMetrics {
     pub hits: AtomicUsize,
     pub misses: AtomicUsize,
-    
+
     // Cached hit latency (µs) - recorded when cache hit occurs
     pub cached_hit_latency_sum_micros: AtomicUsize,
     pub cached_hit_count: AtomicUsize,
-    
+
     // Cache miss latency (µs) - recorded for miss path only (lookup + fetch)
     pub cache_miss_latency_sum_micros: AtomicUsize,
     pub cache_miss_count: AtomicUsize,
-    
+
     // Uncached baseline latency (µs) - recorded when cache=off to establish baseline
     pub uncached_latency_sum_micros: AtomicUsize,
     pub uncached_count: AtomicUsize,
@@ -147,7 +147,7 @@ impl CacheMetrics {
     pub fn improvement_factor(&self) -> f64 {
         let cached_hit = self.avg_cached_hit_latency();
         let uncached = self.avg_uncached_latency();
-        
+
         // Must have both measurements to compute improvement
         if cached_hit == 0.0 || uncached == 0.0 {
             0.0
@@ -172,13 +172,19 @@ pub struct CacheReadResult {
 pub trait ContractStateCache: Send + Sync {
     /// Get from cache. Returns (value, was_hit, lookup_latency_micros)
     async fn get(&self, contract_id: &str, key: &str) -> CacheReadResult;
-    
+
     /// Put into cache with optional per-key TTL override
-    async fn put(&self, contract_id: &str, key: &str, value: String, ttl_override: Option<Duration>);
-    
+    async fn put(
+        &self,
+        contract_id: &str,
+        key: &str,
+        value: String,
+        ttl_override: Option<Duration>,
+    );
+
     /// Invalidate a cache entry
     async fn invalidate(&self, contract_id: &str, key: &str);
-    
+
     fn metrics(&self) -> &CacheMetrics;
 }
 
@@ -207,10 +213,10 @@ impl ContractStateCache for MokaLfuCache {
     async fn get(&self, contract_id: &str, key: &str) -> CacheReadResult {
         let cache_key = format!("{}:{}", contract_id, key);
         let start = Instant::now();
-        
+
         let result = self.cache.get(&cache_key).await;
         let lookup_latency = start.elapsed().as_micros() as usize;
-        
+
         match result {
             Some((value, expiry_opt)) => {
                 // Check if per-key TTL has expired
@@ -226,12 +232,16 @@ impl ContractStateCache for MokaLfuCache {
                         };
                     }
                 }
-                
+
                 // Valid cache hit
                 self.metrics.hits.fetch_add(1, Ordering::Relaxed);
-                self.metrics.cached_hit_latency_sum_micros.fetch_add(lookup_latency, Ordering::Relaxed);
-                self.metrics.cached_hit_count.fetch_add(1, Ordering::Relaxed);
-                
+                self.metrics
+                    .cached_hit_latency_sum_micros
+                    .fetch_add(lookup_latency, Ordering::Relaxed);
+                self.metrics
+                    .cached_hit_count
+                    .fetch_add(1, Ordering::Relaxed);
+
                 CacheReadResult {
                     value: Some(value),
                     was_hit: true,
@@ -250,9 +260,15 @@ impl ContractStateCache for MokaLfuCache {
         }
     }
 
-    async fn put(&self, contract_id: &str, key: &str, value: String, ttl_override: Option<Duration>) {
+    async fn put(
+        &self,
+        contract_id: &str,
+        key: &str,
+        value: String,
+        ttl_override: Option<Duration>,
+    ) {
         let cache_key = format!("{}:{}", contract_id, key);
-        
+
         // Support per-key TTL by storing expiry time with value
         let expiry = ttl_override.map(|ttl| Instant::now() + ttl);
         self.cache.insert(cache_key, (value, expiry)).await;
@@ -283,7 +299,9 @@ pub struct LruCacheImpl {
 impl LruCacheImpl {
     pub fn new(capacity: u64, ttl: Duration) -> Self {
         Self {
-            cache: RwLock::new(lru::LruCache::new(std::num::NonZeroUsize::new(capacity as usize).unwrap())),
+            cache: RwLock::new(lru::LruCache::new(
+                std::num::NonZeroUsize::new(capacity as usize).unwrap(),
+            )),
             metrics: CacheMetrics::default(),
             default_ttl: ttl,
         }
@@ -295,28 +313,32 @@ impl ContractStateCache for LruCacheImpl {
     async fn get(&self, contract_id: &str, key: &str) -> CacheReadResult {
         let cache_key = format!("{}:{}", contract_id, key);
         let start = Instant::now();
-        let mut cache = self.cache.write().await; 
-        
+        let mut cache = self.cache.write().await;
+
         // Check existence and expiry
         if let Some(entry) = cache.get(&cache_key) {
-           if entry.expiry > Instant::now() {
-               // Valid hit
-               let lookup_latency = start.elapsed().as_micros() as usize;
-               self.metrics.hits.fetch_add(1, Ordering::Relaxed);
-               self.metrics.cached_hit_latency_sum_micros.fetch_add(lookup_latency, Ordering::Relaxed);
-               self.metrics.cached_hit_count.fetch_add(1, Ordering::Relaxed);
-               
-               return CacheReadResult {
-                   value: Some(entry.value.clone()),
-                   was_hit: true,
-                   lookup_latency_micros: lookup_latency,
-               };
-           } else {
-               // Expired - remove it
-               cache.pop(&cache_key);
-           }
+            if entry.expiry > Instant::now() {
+                // Valid hit
+                let lookup_latency = start.elapsed().as_micros() as usize;
+                self.metrics.hits.fetch_add(1, Ordering::Relaxed);
+                self.metrics
+                    .cached_hit_latency_sum_micros
+                    .fetch_add(lookup_latency, Ordering::Relaxed);
+                self.metrics
+                    .cached_hit_count
+                    .fetch_add(1, Ordering::Relaxed);
+
+                return CacheReadResult {
+                    value: Some(entry.value.clone()),
+                    was_hit: true,
+                    lookup_latency_micros: lookup_latency,
+                };
+            } else {
+                // Expired - remove it
+                cache.pop(&cache_key);
+            }
         }
-        
+
         // Miss (not found or expired)
         let lookup_latency = start.elapsed().as_micros() as usize;
         self.metrics.misses.fetch_add(1, Ordering::Relaxed);
@@ -327,7 +349,13 @@ impl ContractStateCache for LruCacheImpl {
         }
     }
 
-    async fn put(&self, contract_id: &str, key: &str, value: String, ttl_override: Option<Duration>) {
+    async fn put(
+        &self,
+        contract_id: &str,
+        key: &str,
+        value: String,
+        ttl_override: Option<Duration>,
+    ) {
         let cache_key = format!("{}:{}", contract_id, key);
         let ttl = ttl_override.unwrap_or(self.default_ttl);
         let expiry = Instant::now() + ttl;
@@ -336,9 +364,9 @@ impl ContractStateCache for LruCacheImpl {
     }
 
     async fn invalidate(&self, contract_id: &str, key: &str) {
-         let cache_key = format!("{}:{}", contract_id, key);
-         let mut cache = self.cache.write().await;
-         cache.pop(&cache_key);
+        let cache_key = format!("{}:{}", contract_id, key);
+        let mut cache = self.cache.write().await;
+        cache.pop(&cache_key);
     }
 
     fn metrics(&self) -> &CacheMetrics {
@@ -355,13 +383,17 @@ pub struct CacheLayer {
 impl CacheLayer {
     pub fn new(config: CacheConfig) -> Self {
         let backend: Box<dyn ContractStateCache + Send + Sync> = match config.policy {
-            EvictionPolicy::Lfu => Box::new(MokaLfuCache::new(config.max_capacity, config.global_ttl)),
-            EvictionPolicy::Lru => Box::new(LruCacheImpl::new(config.max_capacity, config.global_ttl)),
+            EvictionPolicy::Lfu => {
+                Box::new(MokaLfuCache::new(config.max_capacity, config.global_ttl))
+            }
+            EvictionPolicy::Lru => {
+                Box::new(LruCacheImpl::new(config.max_capacity, config.global_ttl))
+            }
         };
 
         Self { backend, config }
     }
-    
+
     pub fn config(&self) -> &CacheConfig {
         &self.config
     }
@@ -372,25 +404,39 @@ impl CacheLayer {
         if !self.config.enabled {
             return (None, false);
         }
-        
+
         let result = self.backend.get(contract_id, key).await;
-        
+
         // Record cache miss latency if this was a miss
         if !result.was_hit {
-            self.backend.metrics().cache_miss_latency_sum_micros.fetch_add(result.lookup_latency_micros, Ordering::Relaxed);
-            self.backend.metrics().cache_miss_count.fetch_add(1, Ordering::Relaxed);
+            self.backend
+                .metrics()
+                .cache_miss_latency_sum_micros
+                .fetch_add(result.lookup_latency_micros, Ordering::Relaxed);
+            self.backend
+                .metrics()
+                .cache_miss_count
+                .fetch_add(1, Ordering::Relaxed);
         }
-        
+
         (result.value, result.was_hit)
     }
 
-    pub async fn put(&self, contract_id: &str, key: &str, value: String, ttl_override: Option<Duration>) {
+    pub async fn put(
+        &self,
+        contract_id: &str,
+        key: &str,
+        value: String,
+        ttl_override: Option<Duration>,
+    ) {
         if !self.config.enabled {
             return;
         }
-        self.backend.put(contract_id, key, value, ttl_override).await;
+        self.backend
+            .put(contract_id, key, value, ttl_override)
+            .await;
     }
-    
+
     pub async fn invalidate(&self, contract_id: &str, key: &str) {
         if !self.config.enabled {
             return;
@@ -401,12 +447,18 @@ impl CacheLayer {
     pub fn metrics(&self) -> &CacheMetrics {
         self.backend.metrics()
     }
-    
+
     /// Record uncached baseline latency (for cache=off requests)
     pub fn record_uncached_latency(&self, duration: Duration) {
         let micros = duration.as_micros() as usize;
-        self.backend.metrics().uncached_latency_sum_micros.fetch_add(micros, Ordering::Relaxed);
-        self.backend.metrics().uncached_count.fetch_add(1, Ordering::Relaxed);
+        self.backend
+            .metrics()
+            .uncached_latency_sum_micros
+            .fetch_add(micros, Ordering::Relaxed);
+        self.backend
+            .metrics()
+            .uncached_count
+            .fetch_add(1, Ordering::Relaxed);
     }
 }
 
@@ -423,13 +475,13 @@ mod tests {
             max_capacity: 100,
         };
         let cache = CacheLayer::new(config);
-        
+
         cache.put("c1", "k1", "v1".to_string(), None).await;
-        
+
         let (val, was_hit) = cache.get("c1", "k1").await;
         assert_eq!(val, Some("v1".to_string()));
         assert!(was_hit);
-        
+
         // Miss
         let (val2, was_hit2) = cache.get("c1", "k2").await;
         assert!(val2.is_none());
@@ -438,14 +490,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_invalidation() {
-         let config = CacheConfig::default();
-         let cache = CacheLayer::new(config);
-         
-         cache.put("c1", "k1", "v1".to_string(), None).await;
-         cache.invalidate("c1", "k1").await;
-         
-         let (val, _) = cache.get("c1", "k1").await;
-         assert!(val.is_none());
+        let config = CacheConfig::default();
+        let cache = CacheLayer::new(config);
+
+        cache.put("c1", "k1", "v1".to_string(), None).await;
+        cache.invalidate("c1", "k1").await;
+
+        let (val, _) = cache.get("c1", "k1").await;
+        assert!(val.is_none());
     }
 
     #[tokio::test]
@@ -459,20 +511,20 @@ mod tests {
         let cache = CacheLayer::new(config);
 
         cache.put("c1", "k1", "v1".to_string(), None).await;
-        
+
         // Immediate get
         let (val, was_hit) = cache.get("c1", "k1").await;
         assert_eq!(val, Some("v1".to_string()));
         assert!(was_hit);
-        
+
         // Wait for expiration
         tokio::time::sleep(Duration::from_millis(100)).await;
-        
+
         // Should be expired
         let (val2, _) = cache.get("c1", "k1").await;
         assert!(val2.is_none());
     }
-    
+
     #[tokio::test]
     async fn test_per_key_ttl_override() {
         let config = CacheConfig {
@@ -482,53 +534,60 @@ mod tests {
             max_capacity: 100,
         };
         let cache = CacheLayer::new(config);
-        
+
         // Put with short override
-        cache.put("c1", "k1", "v1".to_string(), Some(Duration::from_millis(50))).await;
-        
+        cache
+            .put(
+                "c1",
+                "k1",
+                "v1".to_string(),
+                Some(Duration::from_millis(50)),
+            )
+            .await;
+
         let (val, was_hit) = cache.get("c1", "k1").await;
         assert!(was_hit);
-        
+
         // Wait for override TTL
         tokio::time::sleep(Duration::from_millis(100)).await;
-        
+
         // Should be expired (override, not global)
         let (val2, _) = cache.get("c1", "k1").await;
         assert!(val2.is_none());
     }
-    
+
     #[tokio::test]
     async fn test_metrics_symmetric() {
         let config = CacheConfig::default();
         let cache = CacheLayer::new(config);
-        
+
         cache.put("c1", "k1", "v1".to_string(), None).await;
-        
+
         cache.get("c1", "k1").await; // Hit
         cache.get("c1", "k2").await; // Miss
-        
+
         let m = cache.metrics();
         assert_eq!(m.hits.load(Ordering::Relaxed), 1);
         assert_eq!(m.misses.load(Ordering::Relaxed), 1);
         assert_eq!(m.hit_rate(), 50.0);
-        
+
         // Verify latencies are recorded
         assert!(m.cached_hit_count.load(Ordering::Relaxed) > 0);
         assert!(m.cached_hit_latency_sum_micros.load(Ordering::Relaxed) > 0);
         assert!(m.cache_miss_count.load(Ordering::Relaxed) > 0);
         assert!(m.cache_miss_latency_sum_micros.load(Ordering::Relaxed) > 0);
     }
-    
+
     #[tokio::test]
     async fn test_disabled() {
-         let config = CacheConfig {
+        let config = CacheConfig {
             enabled: false,
-             ..CacheConfig::default()
-         };
-         let cache = CacheLayer::new(config);
-         
-         cache.put("c1", "k1", "v1".to_string(), None).await;
-         let (val, _) = cache.get("c1", "k1").await;
-         assert!(val.is_none());
+            ..CacheConfig::default()
+        };
+        let cache = CacheLayer::new(config);
+
+        cache.put("c1", "k1", "v1".to_string(), None).await;
+        let (val, _) = cache.get("c1", "k1").await;
+        assert!(val.is_none());
     }
 }

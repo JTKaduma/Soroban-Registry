@@ -1,8 +1,9 @@
 // api/src/detector.rs
 // Static pattern-matching auto-detector for Soroban Rust source code.
 
-use std::collections::HashMap;
 use crate::checklist::all_checks;
+use shared::models::{CheckStatus, DetectionMethod};
+use std::collections::HashMap;
 use crate::models::{CheckStatus, DetectionMethod};
 
 /// Result of running the detector on a single check
@@ -49,7 +50,7 @@ pub fn detect_all(source: &str) -> HashMap<String, DetectionResult> {
             "DS-001" => detect_contracttype(&lines),
             "SP-001" => detect_datakey_enum(&lines),
             "RL-001" => detect_bounded_loops(&lines),
-            _        => detect_generic(&lines, &patterns),
+            _ => detect_generic(&lines, &patterns),
         };
 
         results.insert(check.id.to_string(), result);
@@ -64,7 +65,9 @@ pub fn detect_all(source: &str) -> HashMap<String, DetectionResult> {
 
 fn detect_unwrap(lines: &[&str]) -> DetectionResult {
     for (i, line) in lines.iter().enumerate() {
-        if is_test_line(line) || line.trim_start().starts_with("//") { continue; }
+        if is_test_line(line) || line.trim_start().starts_with("//") {
+            continue;
+        }
         if line.contains(".unwrap()") {
             return DetectionResult {
                 status: CheckStatus::Failed,
@@ -72,12 +75,17 @@ fn detect_unwrap(lines: &[&str]) -> DetectionResult {
             };
         }
     }
-    DetectionResult { status: CheckStatus::Passed, evidence: None }
+    DetectionResult {
+        status: CheckStatus::Passed,
+        evidence: None,
+    }
 }
 
 fn detect_expect(lines: &[&str]) -> DetectionResult {
     for (i, line) in lines.iter().enumerate() {
-        if is_test_line(line) || line.trim_start().starts_with("//") { continue; }
+        if is_test_line(line) || line.trim_start().starts_with("//") {
+            continue;
+        }
         if line.contains(".expect(") {
             return DetectionResult {
                 status: CheckStatus::Failed,
@@ -85,12 +93,17 @@ fn detect_expect(lines: &[&str]) -> DetectionResult {
             };
         }
     }
-    DetectionResult { status: CheckStatus::Passed, evidence: None }
+    DetectionResult {
+        status: CheckStatus::Passed,
+        evidence: None,
+    }
 }
 
 fn detect_panic_macro(lines: &[&str]) -> DetectionResult {
     for (i, line) in lines.iter().enumerate() {
-        if is_test_line(line) || line.trim_start().starts_with("//") { continue; }
+        if is_test_line(line) || line.trim_start().starts_with("//") {
+            continue;
+        }
         if line.contains("panic!(") {
             return DetectionResult {
                 status: CheckStatus::Failed,
@@ -98,13 +111,18 @@ fn detect_panic_macro(lines: &[&str]) -> DetectionResult {
             };
         }
     }
-    DetectionResult { status: CheckStatus::Passed, evidence: None }
+    DetectionResult {
+        status: CheckStatus::Passed,
+        evidence: None,
+    }
 }
 
 fn detect_direct_index(lines: &[&str]) -> DetectionResult {
     let risky = ["[i]", "[idx]", "[index]", "[n]", "[pos]", "]["];
     for (i, line) in lines.iter().enumerate() {
-        if is_test_line(line) || line.trim_start().starts_with("//") { continue; }
+        if is_test_line(line) || line.trim_start().starts_with("//") {
+            continue;
+        }
         for pat in &risky {
             if line.contains(pat) {
                 return DetectionResult {
@@ -124,7 +142,10 @@ fn detect_direct_index(lines: &[&str]) -> DetectionResult {
             }
         }
     }
-    DetectionResult { status: CheckStatus::Passed, evidence: None }
+    DetectionResult {
+        status: CheckStatus::Passed,
+        evidence: None,
+    }
 }
 
 fn detect_require_auth(lines: &[&str], privilege_keywords: &[&str]) -> DetectionResult {
@@ -137,7 +158,10 @@ fn detect_require_auth(lines: &[&str], privilege_keywords: &[&str]) -> Detection
             evidence: Some("Privileged function found but no require_auth() call detected".into()),
         }
     } else {
-        DetectionResult { status: CheckStatus::Passed, evidence: None }
+        DetectionResult {
+            status: CheckStatus::Passed,
+            evidence: None,
+        }
     }
 }
 
@@ -151,7 +175,10 @@ fn detect_transfer_without_auth(lines: &[&str]) -> DetectionResult {
             evidence: Some("Transfer call found with no require_auth() in scope".into()),
         }
     } else {
-        DetectionResult { status: CheckStatus::Passed, evidence: None }
+        DetectionResult {
+            status: CheckStatus::Passed,
+            evidence: None,
+        }
     }
 }
 
@@ -167,13 +194,17 @@ fn detect_init_guard(lines: &[&str]) -> DetectionResult {
             evidence: Some("initialize() found but no re-initialization guard detected".into()),
         }
     } else {
-        DetectionResult { status: CheckStatus::Passed, evidence: None }
+        DetectionResult {
+            status: CheckStatus::Passed,
+            evidence: None,
+        }
     }
 }
 
 fn detect_upgrade_guard(lines: &[&str]) -> DetectionResult {
     let source = lines.join("\n");
-    let has_upgrade = source.contains("fn upgrade") || source.contains("update_current_contract_wasm");
+    let has_upgrade =
+        source.contains("fn upgrade") || source.contains("update_current_contract_wasm");
     let has_auth = source.contains("require_auth()");
     if has_upgrade && !has_auth {
         DetectionResult {
@@ -181,14 +212,22 @@ fn detect_upgrade_guard(lines: &[&str]) -> DetectionResult {
             evidence: Some("upgrade() found without require_auth() protection".into()),
         }
     } else {
-        DetectionResult { status: CheckStatus::Passed, evidence: None }
+        DetectionResult {
+            status: CheckStatus::Passed,
+            evidence: None,
+        }
     }
 }
 
 fn detect_unchecked_arithmetic(lines: &[&str]) -> DetectionResult {
     let safe_patterns = [
-        "checked_add", "checked_sub", "checked_mul", "checked_div",
-        "saturating_add", "saturating_sub", "saturating_mul",
+        "checked_add",
+        "checked_sub",
+        "checked_mul",
+        "checked_div",
+        "saturating_add",
+        "saturating_sub",
+        "saturating_mul",
     ];
     let source = lines.join("\n");
     let has_arithmetic = lines.iter().any(|l| {
@@ -205,14 +244,19 @@ fn detect_unchecked_arithmetic(lines: &[&str]) -> DetectionResult {
             evidence: Some("Arithmetic found without checked_add/sub/mul equivalents".into()),
         }
     } else {
-        DetectionResult { status: CheckStatus::Passed, evidence: None }
+        DetectionResult {
+            status: CheckStatus::Passed,
+            evidence: None,
+        }
     }
 }
 
 fn detect_division_by_zero_guard(lines: &[&str]) -> DetectionResult {
     for (i, line) in lines.iter().enumerate() {
         let t = line.trim();
-        if t.starts_with("//") { continue; }
+        if t.starts_with("//") {
+            continue;
+        }
         if (t.contains("/ ") || t.contains("/=")) && !t.contains("//") && !t.contains("\"") {
             let start = i.saturating_sub(5);
             let end = (i + 5).min(lines.len());
@@ -220,34 +264,56 @@ fn detect_division_by_zero_guard(lines: &[&str]) -> DetectionResult {
             if !window.contains("require!") && !window.contains("!= 0") && !window.contains("> 0") {
                 return DetectionResult {
                     status: CheckStatus::Failed,
-                    evidence: Some(format!("Line {}: Division without denominator guard: {}", i + 1, t)),
+                    evidence: Some(format!(
+                        "Line {}: Division without denominator guard: {}",
+                        i + 1,
+                        t
+                    )),
                 };
             }
         }
     }
-    DetectionResult { status: CheckStatus::Passed, evidence: None }
+    DetectionResult {
+        status: CheckStatus::Passed,
+        evidence: None,
+    }
 }
 
 fn detect_truncating_cast(lines: &[&str]) -> DetectionResult {
-    let dangerous = ["as i32", "as u32", "as i64", "as u64", "as i8", "as u8", "as usize"];
+    let dangerous = [
+        "as i32", "as u32", "as i64", "as u64", "as i8", "as u8", "as usize",
+    ];
     for (i, line) in lines.iter().enumerate() {
-        if is_test_line(line) { continue; }
+        if is_test_line(line) {
+            continue;
+        }
         for cast in &dangerous {
             if line.contains(cast) {
                 return DetectionResult {
                     status: CheckStatus::Failed,
-                    evidence: Some(format!("Line {}: Truncating cast `{}`: {}", i + 1, cast, line.trim())),
+                    evidence: Some(format!(
+                        "Line {}: Truncating cast `{}`: {}",
+                        i + 1,
+                        cast,
+                        line.trim()
+                    )),
                 };
             }
         }
     }
-    DetectionResult { status: CheckStatus::Passed, evidence: None }
+    DetectionResult {
+        status: CheckStatus::Passed,
+        evidence: None,
+    }
 }
 
 fn detect_require_auth_present(lines: &[&str]) -> DetectionResult {
     let source = lines.join("\n");
     if source.contains("require_auth()") || source.contains("require_auth_for_args") {
-        DetectionResult { status: CheckStatus::Passed, evidence: None }
+        DetectionResult {
+            status: CheckStatus::Passed,
+            evidence: None,
+        }
     } else {
         DetectionResult {
             status: CheckStatus::Failed,
@@ -259,7 +325,9 @@ fn detect_require_auth_present(lines: &[&str]) -> DetectionResult {
 fn detect_silent_discard(lines: &[&str]) -> DetectionResult {
     for (i, line) in lines.iter().enumerate() {
         let t = line.trim();
-        if t.starts_with("//") { continue; }
+        if t.starts_with("//") {
+            continue;
+        }
         if t.starts_with("let _ =") || t.starts_with("let _r =") || t.contains("; let _") {
             return DetectionResult {
                 status: CheckStatus::Failed,
@@ -267,7 +335,10 @@ fn detect_silent_discard(lines: &[&str]) -> DetectionResult {
             };
         }
     }
-    DetectionResult { status: CheckStatus::Passed, evidence: None }
+    DetectionResult {
+        status: CheckStatus::Passed,
+        evidence: None,
+    }
 }
 
 fn detect_storage_none_handled(lines: &[&str]) -> DetectionResult {
@@ -284,7 +355,10 @@ fn detect_storage_none_handled(lines: &[&str]) -> DetectionResult {
             };
         }
     }
-    DetectionResult { status: CheckStatus::Passed, evidence: None }
+    DetectionResult {
+        status: CheckStatus::Passed,
+        evidence: None,
+    }
 }
 
 fn detect_ttl_extension(lines: &[&str]) -> DetectionResult {
@@ -297,7 +371,10 @@ fn detect_ttl_extension(lines: &[&str]) -> DetectionResult {
             evidence: Some("Persistent storage used but extend_ttl() never called".into()),
         }
     } else {
-        DetectionResult { status: CheckStatus::Passed, evidence: None }
+        DetectionResult {
+            status: CheckStatus::Passed,
+            evidence: None,
+        }
     }
 }
 
@@ -309,7 +386,10 @@ fn detect_instance_ttl(lines: &[&str]) -> DetectionResult {
             evidence: Some("instance() storage used but extend_ttl never called on it".into()),
         }
     } else {
-        DetectionResult { status: CheckStatus::Passed, evidence: None }
+        DetectionResult {
+            status: CheckStatus::Passed,
+            evidence: None,
+        }
     }
 }
 
@@ -337,13 +417,18 @@ fn detect_state_before_call(lines: &[&str]) -> DetectionResult {
                 return DetectionResult {
                     status: CheckStatus::Failed,
                     evidence: Some(format!(
-                        "Line {}: State written after external call — CEI violation: {}", i + 1, t
+                        "Line {}: State written after external call — CEI violation: {}",
+                        i + 1,
+                        t
                     )),
                 };
             }
         }
     }
-    DetectionResult { status: CheckStatus::Passed, evidence: None }
+    DetectionResult {
+        status: CheckStatus::Passed,
+        evidence: None,
+    }
 }
 
 fn detect_token_transfer_error(lines: &[&str]) -> DetectionResult {
@@ -357,14 +442,18 @@ fn detect_token_transfer_error(lines: &[&str]) -> DetectionResult {
                         status: CheckStatus::Failed,
                         evidence: Some(format!(
                             "Line {}: Token transfer result may not be propagated: {}",
-                            i + 1, line.trim()
+                            i + 1,
+                            line.trim()
                         )),
                     };
                 }
             }
         }
     }
-    DetectionResult { status: CheckStatus::Passed, evidence: None }
+    DetectionResult {
+        status: CheckStatus::Passed,
+        evidence: None,
+    }
 }
 
 fn detect_events_on_transfers(lines: &[&str]) -> DetectionResult {
@@ -379,18 +468,26 @@ fn detect_events_on_transfers(lines: &[&str]) -> DetectionResult {
             evidence: Some("Transfer/deposit/withdraw found without event emissions".into()),
         }
     } else {
-        DetectionResult { status: CheckStatus::Passed, evidence: None }
+        DetectionResult {
+            status: CheckStatus::Passed,
+            evidence: None,
+        }
     }
 }
 
 fn detect_contracttype(lines: &[&str]) -> DetectionResult {
     let source = lines.join("\n");
     if source.contains("#[contracttype]") {
-        DetectionResult { status: CheckStatus::Passed, evidence: None }
+        DetectionResult {
+            status: CheckStatus::Passed,
+            evidence: None,
+        }
     } else {
         DetectionResult {
             status: CheckStatus::Failed,
-            evidence: Some("#[contracttype] not found — custom types may not serialize correctly".into()),
+            evidence: Some(
+                "#[contracttype] not found — custom types may not serialize correctly".into(),
+            ),
         }
     }
 }
@@ -398,7 +495,10 @@ fn detect_contracttype(lines: &[&str]) -> DetectionResult {
 fn detect_datakey_enum(lines: &[&str]) -> DetectionResult {
     let source = lines.join("\n");
     if source.contains("DataKey") && source.contains("#[contracttype]") {
-        DetectionResult { status: CheckStatus::Passed, evidence: None }
+        DetectionResult {
+            status: CheckStatus::Passed,
+            evidence: None,
+        }
     } else {
         DetectionResult {
             status: CheckStatus::Failed,
@@ -410,36 +510,50 @@ fn detect_datakey_enum(lines: &[&str]) -> DetectionResult {
 fn detect_bounded_loops(lines: &[&str]) -> DetectionResult {
     for (i, line) in lines.iter().enumerate() {
         let t = line.trim();
-        if t.starts_with("//") { continue; }
+        if t.starts_with("//") {
+            continue;
+        }
         if (t.starts_with("for ") && t.contains(".iter()"))
             || (t.starts_with("for ") && t.contains("in &"))
         {
             let start = i.saturating_sub(10);
             let end = (i + 3).min(lines.len());
             let window = lines[start..end].join("\n");
-            if !window.contains("MAX") && !window.contains("max_") && !window.contains(".len() <=") {
+            if !window.contains("MAX") && !window.contains("max_") && !window.contains(".len() <=")
+            {
                 return DetectionResult {
                     status: CheckStatus::Failed,
                     evidence: Some(format!(
-                        "Line {}: Unbounded loop without MAX guard: {}", i + 1, t
+                        "Line {}: Unbounded loop without MAX guard: {}",
+                        i + 1,
+                        t
                     )),
                 };
             }
         }
     }
-    DetectionResult { status: CheckStatus::Passed, evidence: None }
+    DetectionResult {
+        status: CheckStatus::Passed,
+        evidence: None,
+    }
 }
 
 fn detect_generic(lines: &[&str], good_patterns: &[String]) -> DetectionResult {
     let source = lines.join("\n");
     for pat in good_patterns {
         if source.contains(pat.as_str()) {
-            return DetectionResult { status: CheckStatus::Passed, evidence: None };
+            return DetectionResult {
+                status: CheckStatus::Passed,
+                evidence: None,
+            };
         }
     }
     DetectionResult {
         status: CheckStatus::Failed,
-        evidence: Some(format!("None of the expected patterns found: {}", good_patterns.join(", "))),
+        evidence: Some(format!(
+            "None of the expected patterns found: {}",
+            good_patterns.join(", ")
+        )),
     }
 }
 
@@ -487,20 +601,40 @@ pub fn transfer(env: Env, from: Address, amount: i128) {
     #[test]
     fn good_source_has_fewer_failures() {
         let good = detect_all(GOOD_SOURCE);
-        let bad  = detect_all(BAD_SOURCE);
-        let good_fails = good.values().filter(|r| r.status == CheckStatus::Failed).count();
-        let bad_fails  = bad.values().filter(|r| r.status == CheckStatus::Failed).count();
-        assert!(bad_fails > good_fails, "bad({}) should exceed good({})", bad_fails, good_fails);
+        let bad = detect_all(BAD_SOURCE);
+        let good_fails = good
+            .values()
+            .filter(|r| r.status == CheckStatus::Failed)
+            .count();
+        let bad_fails = bad
+            .values()
+            .filter(|r| r.status == CheckStatus::Failed)
+            .count();
+        assert!(
+            bad_fails > good_fails,
+            "bad({}) should exceed good({})",
+            bad_fails,
+            good_fails
+        );
     }
 
     #[test]
     fn unwrap_detection_works() {
-        assert_eq!(detect_unwrap(&["let x = foo.unwrap();"]).status, CheckStatus::Failed);
-        assert_eq!(detect_unwrap(&["let x = foo.ok_or(Err::E)?"]).status, CheckStatus::Passed);
+        assert_eq!(
+            detect_unwrap(&["let x = foo.unwrap();"]).status,
+            CheckStatus::Failed
+        );
+        assert_eq!(
+            detect_unwrap(&["let x = foo.ok_or(Err::E)?"]).status,
+            CheckStatus::Passed
+        );
     }
 
     #[test]
     fn panic_detection_works() {
-        assert_eq!(detect_panic_macro(&[r#"panic!("bad");"#]).status, CheckStatus::Failed);
+        assert_eq!(
+            detect_panic_macro(&[r#"panic!("bad");"#]).status,
+            CheckStatus::Failed
+        );
     }
 }
