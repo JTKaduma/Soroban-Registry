@@ -84,6 +84,7 @@ export interface ContractSearchParams {
   sort_by?: "name" | "created_at" | "popularity" | "downloads";
   sort_order?: "asc" | "desc";
   tags?: string[];
+  maturity?: 'alpha' | 'beta' | 'stable' | 'mature' | 'legacy';
   page?: number;
   page_size?: number;
 }

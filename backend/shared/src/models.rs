@@ -193,6 +193,7 @@ pub struct ContractSearchParams {
     pub verified_only: Option<bool>,
     pub category: Option<String>,
     pub tags: Option<Vec<String>>,
+    pub maturity: Option<MaturityLevel>,
     pub page: Option<i64>,
     #[serde(alias = "page_size")]
     pub limit: Option<i64>,

@@ -1,4 +1,5 @@
 mod commands;
+mod backup;
 mod config;
 mod events;
 mod export;
