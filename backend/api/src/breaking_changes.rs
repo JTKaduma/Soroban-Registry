@@ -8,7 +8,7 @@ use crate::type_safety::parser::parse_json_spec;
 use crate::type_safety::types::{ContractABI, ContractFunction, SorobanType, StructField, EnumVariant};
 use crate::error::{ApiError, ApiResult};
 
-#[derive(Debug, Serialize, Clone, Copy)]
+#[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ChangeSeverity {
     Breaking,
