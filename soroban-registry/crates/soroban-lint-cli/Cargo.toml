@@ -1,0 +1,18 @@
+[package]
+name = "soroban-lint-cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "soroban-registry"
+path = "src/main.rs"
+
+[dependencies]
+soroban-lint-core = { path = "../soroban-lint-core" }
+syn = { workspace = true }
+clap = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+colored = { workspace = true }
+walkdir = { workspace = true }
+toml = { workspace = true }
