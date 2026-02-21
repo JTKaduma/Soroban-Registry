@@ -107,6 +107,17 @@ pub enum Commands {
         json: bool,
     },
 
+    /// Detect breaking changes between contract versions
+    BreakingChanges {
+        /// Old contract identifier (UUID or contract_id@version)
+        old_id: String,
+        /// New contract identifier (UUID or contract_id@version)
+        new_id: String,
+        /// Output results as machine-readable JSON
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Contract state migration assistant
     Migrate {
         #[command(subcommand)]
@@ -678,6 +689,10 @@ async fn main() -> Result<()> {
         Commands::List { limit, json } => {
             log::debug!("Command: list | limit={}", limit);
             commands::list(&cli.api_url, limit, network, json).await?;
+        }
+        Commands::BreakingChanges { old_id, new_id, json } => {
+            log::debug!("Command: breaking-changes | old={} new={}", old_id, new_id);
+            commands::breaking_changes(&cli.api_url, &old_id, &new_id, json).await?;
         }
         Commands::Migrate { action } => match action {
             MigrateCommands::Preview { old_id, new_id } => {

@@ -9,12 +9,14 @@ use axum::{
 };
 use serde_json::{json, Value};
 use shared::{
-    Contract, ContractSearchParams, ContractVersion, PaginatedResponse, PublishRequest, Publisher,
+    Contract, ContractSearchParams, ContractVersion, CreateContractVersionRequest, PaginatedResponse, PublishRequest, Publisher,
+    SemVer,
 };
 use uuid::Uuid;
 
 use crate::{
     error::{ApiError, ApiResult},
+    breaking_changes::{diff_abi, has_breaking_changes, resolve_abi},
     state::AppState,
 };
 
@@ -242,6 +244,141 @@ pub async fn get_contract_versions(
     .map_err(|err| db_internal_error("get contract versions", err))?;
 
     Ok(Json(versions))
+}
+
+pub async fn create_contract_version(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    payload: Result<Json<CreateContractVersionRequest>, JsonRejection>,
+) -> ApiResult<Json<ContractVersion>> {
+    let Json(req) = payload.map_err(map_json_rejection)?;
+
+    let (contract_uuid, contract_id) = fetch_contract_identity(&state, &id).await?;
+    if !req.contract_id.trim().is_empty() && req.contract_id != contract_id {
+        return Err(ApiError::bad_request(
+            "ContractMismatch",
+            "Contract ID in payload does not match path",
+        ));
+    }
+
+    let new_version = SemVer::parse(&req.version).ok_or_else(|| {
+        ApiError::bad_request("InvalidVersion", "Version must be valid semver (e.g. 1.2.3)")
+    })?;
+
+    let existing_versions: Vec<String> = sqlx::query_scalar(
+        "SELECT version FROM contract_versions WHERE contract_id = $1",
+    )
+    .bind(contract_uuid)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|err| db_internal_error("fetch contract versions", err))?;
+
+    if !existing_versions.is_empty() {
+        let mut parsed: Vec<SemVer> = Vec::with_capacity(existing_versions.len());
+        for version in &existing_versions {
+            let parsed_version = SemVer::parse(version).ok_or_else(|| {
+                ApiError::unprocessable(
+                    "InvalidExistingVersion",
+                    format!("Existing version '{}' is not valid semver", version),
+                )
+            })?;
+            parsed.push(parsed_version);
+        }
+        parsed.sort();
+        let latest_version = parsed.last().cloned();
+
+        if let Some(old_version) = latest_version {
+            let old_selector = format!("{}@{}", contract_id, old_version);
+            let old_abi = resolve_abi(&state, &old_selector).await?;
+            let old_spec = crate::type_safety::parser::parse_json_spec(&old_abi, &contract_id)
+                .map_err(|e| ApiError::bad_request("InvalidABI", format!("Failed to parse old ABI: {}", e)))?;
+
+            let new_spec = crate::type_safety::parser::parse_json_spec(&req.abi.to_string(), &contract_id)
+                .map_err(|e| ApiError::bad_request("InvalidABI", format!("Failed to parse new ABI: {}", e)))?;
+
+            let changes = diff_abi(&old_spec, &new_spec);
+            if has_breaking_changes(&changes) && new_version.major == old_version.major {
+                return Err(ApiError::unprocessable(
+                    "BreakingChangeWithoutMajorBump",
+                    format!(
+                        "Breaking changes detected; bump major version from {} to {}",
+                        old_version, new_version
+                    ),
+                ));
+            }
+        }
+    }
+
+    let mut tx = state
+        .db
+        .begin()
+        .await
+        .map_err(|err| db_internal_error("begin transaction", err))?;
+
+    let version_row: ContractVersion = sqlx::query_as(
+        "INSERT INTO contract_versions (contract_id, version, wasm_hash, source_url, commit_hash, release_notes) \
+         VALUES ($1, $2, $3, $4, $5, $6) \
+         RETURNING *",
+    )
+    .bind(contract_uuid)
+    .bind(&req.version)
+    .bind(&req.wasm_hash)
+    .bind(&req.source_url)
+    .bind(&req.commit_hash)
+    .bind(&req.release_notes)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|err| match err {
+        sqlx::Error::Database(db_err)
+            if db_err.constraint() == Some("contract_versions_contract_id_version_key") =>
+        {
+            ApiError::unprocessable(
+                "VersionAlreadyExists",
+                format!("Version '{}' already exists for this contract", req.version),
+            )
+        }
+        _ => db_internal_error("insert contract version", err),
+    })?;
+
+    sqlx::query(
+        "INSERT INTO contract_abis (contract_id, version, abi) VALUES ($1, $2, $3) \
+         ON CONFLICT (contract_id, version) DO UPDATE SET abi = EXCLUDED.abi",
+    )
+    .bind(contract_uuid)
+    .bind(&req.version)
+    .bind(&req.abi)
+    .execute(&mut *tx)
+    .await
+    .map_err(|err| db_internal_error("insert contract abi", err))?;
+
+    tx.commit()
+        .await
+        .map_err(|err| db_internal_error("commit contract version", err))?;
+
+    Ok(Json(version_row))
+}
+
+async fn fetch_contract_identity(state: &AppState, id: &str) -> ApiResult<(Uuid, String)> {
+    if let Ok(uuid) = Uuid::parse_str(id) {
+        let row = sqlx::query_as::<_, (Uuid, String)>(
+            "SELECT id, contract_id FROM contracts WHERE id = $1",
+        )
+        .bind(uuid)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|err| db_internal_error("fetch contract", err))?;
+        return row.ok_or_else(|| ApiError::not_found("ContractNotFound", format!("No contract found with ID: {}", id)));
+    }
+
+    let row = sqlx::query_as::<_, (Uuid, String)>(
+        "SELECT id, contract_id FROM contracts WHERE contract_id = $1",
+    )
+    .bind(id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|err| db_internal_error("fetch contract", err))?;
+
+    row.ok_or_else(|| ApiError::not_found("ContractNotFound", format!("No contract found with ID: {}", id)))
 }
 
 pub async fn publish_contract(

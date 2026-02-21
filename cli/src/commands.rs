@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use colored::Colorize;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fs;
@@ -238,6 +239,66 @@ pub async fn list(api_url: &str, limit: usize, network: Network, json: bool,) ->
 
     println!("\n{}", "=".repeat(80).cyan());
     println!();
+
+    Ok(())
+}
+
+pub async fn breaking_changes(api_url: &str, old_id: &str, new_id: &str, json: bool) -> Result<()> {
+    let client = reqwest::Client::new();
+    let url = format!(
+        "{}/api/contracts/breaking-changes?old_id={}&new_id={}",
+        api_url, old_id, new_id
+    );
+
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .context("Failed to fetch breaking changes")?;
+
+    if !response.status().is_success() {
+        let error_text = response.text().await?;
+        anyhow::bail!("Failed to fetch breaking changes: {}", error_text);
+    }
+
+    let report: serde_json::Value = response.json().await?;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        return Ok(());
+    }
+
+    let breaking = report["breaking"].as_bool().unwrap_or(false);
+    let breaking_count = report["breaking_count"].as_u64().unwrap_or(0);
+    let non_breaking_count = report["non_breaking_count"].as_u64().unwrap_or(0);
+
+    let header = if breaking {
+        "Breaking changes detected".red().bold()
+    } else {
+        "No breaking changes detected".green().bold()
+    };
+
+    println!("\n{}", header);
+    println!(
+        "{} {} | {} {}",
+        "Breaking:".bold(),
+        breaking_count,
+        "Non-breaking:".bold(),
+        non_breaking_count
+    );
+
+    if let Some(changes) = report["changes"].as_array() {
+        for change in changes {
+            let severity = change["severity"].as_str().unwrap_or("unknown");
+            let message = change["message"].as_str().unwrap_or("Change");
+            let label = if severity == "breaking" {
+                "BREAKING".red().bold()
+            } else {
+                "INFO".yellow().bold()
+            };
+            println!("  {} {}", label, message);
+        }
+    }
 
     Ok(())
 }

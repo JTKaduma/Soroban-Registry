@@ -157,6 +157,18 @@ pub struct PublishRequest {
     pub dependencies: Vec<DependencyDeclaration>,
 }
 
+/// Request to create a new contract version with ABI
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateContractVersionRequest {
+    pub contract_id: String,
+    pub version: String,
+    pub wasm_hash: String,
+    pub abi: serde_json::Value,
+    pub source_url: Option<String>,
+    pub commit_hash: Option<String>,
+    pub release_notes: Option<String>,
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Deprecation management (issue #65)
 // ────────────────────────────────────────────────────────────────────────────
