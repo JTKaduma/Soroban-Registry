@@ -54,6 +54,62 @@ export interface ContractHealth {
   updated_at: string;
 }
 
+/** Contract interaction (invocation) — Issue #46 */
+export interface ContractInteractionResponse {
+  id: string;
+  account: string | null;
+  method: string | null;
+  parameters: unknown;
+  return_value: unknown;
+  transaction_hash: string | null;
+  created_at: string;
+}
+
+export interface InteractionsQueryParams {
+  limit?: number;
+  offset?: number;
+  account?: string;
+  method?: string;
+  from_timestamp?: string;
+  to_timestamp?: string;
+}
+
+export interface InteractionsListResponse {
+  items: ContractInteractionResponse[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+/** Analytics timeline entry (one day) */
+export interface TimelineEntry {
+  date: string;
+  count: number;
+}
+
+export interface TopUser {
+  address: string;
+  count: number;
+}
+
+export interface InteractorStats {
+  unique_count: number;
+  top_users: TopUser[];
+}
+
+export interface DeploymentStats {
+  count: number;
+  unique_users: number;
+  by_network: Record<string, number>;
+}
+
+export interface ContractAnalyticsResponse {
+  contract_id: string;
+  deployments: DeploymentStats;
+  interactors: InteractorStats;
+  timeline: TimelineEntry[];
+}
+
 export interface ContractVersion {
   id: string;
   contract_id: string;
@@ -356,6 +412,31 @@ export const api = {
   async getContractDependencies(id: string): Promise<DependencyTreeNode[]> {
     const response = await fetch(`${API_URL}/api/contracts/${id}/dependencies`);
     if (!response.ok) throw new Error('Failed to fetch contract dependencies');
+    return response.json();
+  },
+
+  async getContractInteractions(
+    id: string,
+    params?: InteractionsQueryParams,
+  ): Promise<InteractionsListResponse> {
+    const search = new URLSearchParams();
+    if (params?.limit != null) search.set("limit", String(params.limit));
+    if (params?.offset != null) search.set("offset", String(params.offset));
+    if (params?.account) search.set("account", params.account);
+    if (params?.method) search.set("method", params.method);
+    if (params?.from_timestamp) search.set("from_timestamp", params.from_timestamp);
+    if (params?.to_timestamp) search.set("to_timestamp", params.to_timestamp);
+    const qs = search.toString();
+    const response = await fetch(
+      `${API_URL}/api/contracts/${id}/interactions${qs ? `?${qs}` : ""}`,
+    );
+    if (!response.ok) throw new Error("Failed to fetch contract interactions");
+    return response.json();
+  },
+
+  async getContractAnalytics(id: string): Promise<ContractAnalyticsResponse> {
+    const response = await fetch(`${API_URL}/api/contracts/${id}/analytics`);
+    if (!response.ok) throw new Error("Failed to fetch contract analytics");
     return response.json();
   },
 

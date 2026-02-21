@@ -18,6 +18,7 @@ import {
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import FormalVerificationPanel from "@/components/FormalVerificationPanel";
+import InteractionHistorySection from "@/components/InteractionHistorySection";
 import Navbar from "@/components/Navbar";
 import MaintenanceBanner from "@/components/MaintenanceBanner";
 import { useQueryClient } from "@tanstack/react-query";
@@ -181,6 +182,9 @@ function ContractDetailsContent() {
           <section>
             <ExampleGallery contractId={contract.id} />
           </section>
+
+          {/* Interaction History (Issue #46) */}
+          <InteractionHistorySection contractId={contract.id} />
         </div>
 
         {/* Sidebar */}
