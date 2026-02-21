@@ -1,7 +1,8 @@
 'use client';
 
+import React, { useState, useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { api, ContractSearchParams } from '@/lib/api';
+import { api, ContractSearchParams, Contract } from '@/lib/api';
 import ContractCard from '@/components/ContractCard';
 import ContractCardSkeleton from '@/components/ContractCardSkeleton';
 import { ActiveFilters } from '@/components/contracts/ActiveFilters';
@@ -9,9 +10,8 @@ import { FilterPanel } from '@/components/contracts/FilterPanel';
 import { ResultsCount } from '@/components/contracts/ResultsCount';
 import { SearchBar } from '@/components/contracts/SearchBar';
 import { SortDropdown, SortBy } from '@/components/contracts/SortDropdown';
-import { Filter, Package, SlidersHorizontal, X } from 'lucide-react';
+import { Filter, Package, SlidersHorizontal, X, ArrowUpDown } from 'lucide-react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
 
 const DEFAULT_PAGE_SIZE = 12;
 const CATEGORY_OPTIONS = [
@@ -68,6 +68,7 @@ type ContractsUiFilters = {
   networks: NonNullable<ContractSearchParams['network']>[];
   verified_only: boolean;
   sort_by: SortBy;
+  sort_order: 'asc' | 'desc';
   page: number;
   page_size: number;
 };
@@ -80,8 +81,12 @@ function getInitialFilters(searchParams: URLSearchParams): ContractsUiFilters {
     (network): network is NonNullable<ContractSearchParams['network']> =>
       network === 'mainnet' || network === 'testnet' || network === 'futurenet',
   );
-  const sortBy = searchParams.get('sort_by');
+
+  const sortBy = searchParams.get('sort_by') as SortBy;
+  const sortOrder = searchParams.get('sort_order') as 'asc' | 'desc';
   const parsedPage = Number(searchParams.get('page') || '1');
+
+  const validSortBys: SortBy[] = ['name', 'created_at', 'updated_at', 'popularity', 'deployments', 'interactions', 'relevance', 'downloads'];
 
   return {
     query,
@@ -90,13 +95,8 @@ function getInitialFilters(searchParams: URLSearchParams): ContractsUiFilters {
     author: searchParams.get('author') || '',
     networks,
     verified_only: searchParams.get('verified_only') === 'true',
-    sort_by:
-      sortBy === 'name' ||
-        sortBy === 'created_at' ||
-        sortBy === 'popularity' ||
-        sortBy === 'downloads'
-        ? sortBy
-        : 'created_at',
+    sort_by: validSortBys.includes(sortBy) ? sortBy : (query ? 'relevance' : 'created_at'),
+    sort_order: sortOrder === 'asc' || sortOrder === 'desc' ? sortOrder : 'desc',
     page: Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1,
     page_size: DEFAULT_PAGE_SIZE,
   };
@@ -123,7 +123,8 @@ export function ContractsContent() {
     filters.networks.forEach((network) => params.append('network', network));
     if (filters.author) params.set('author', filters.author);
     if (filters.verified_only) params.set('verified_only', 'true');
-    if (filters.sort_by !== 'created_at') params.set('sort_by', filters.sort_by);
+    if (filters.sort_by) params.set('sort_by', filters.sort_by);
+    if (filters.sort_order) params.set('sort_order', filters.sort_order);
     if (filters.page > 1) params.set('page', String(filters.page));
     params.set('page_size', String(filters.page_size));
 
@@ -140,7 +141,7 @@ export function ContractsContent() {
       networks: filters.networks.length > 0 ? filters.networks : undefined,
       verified_only: filters.verified_only,
       sort_by: filters.sort_by,
-      sort_order: filters.sort_by === 'name' ? 'asc' : 'desc',
+      sort_order: filters.sort_order,
       page: filters.page,
       page_size: filters.page_size,
     }),
@@ -163,6 +164,7 @@ export function ContractsContent() {
       networks: [],
       verified_only: false,
       sort_by: 'created_at',
+      sort_order: 'desc',
       page: 1,
     }));
 
@@ -233,11 +235,11 @@ export function ContractsContent() {
       });
     }
 
-    if (filters.sort_by !== 'created_at') {
+    if (filters.sort_by !== 'created_at' || filters.sort_order !== 'desc') {
       chips.push({
         id: 'sort',
-        label: `Sort: ${filters.sort_by.replace('_', ' ')}`,
-        onRemove: () => setFilters((current) => ({ ...current, sort_by: 'created_at' })),
+        label: `Sort: ${filters.sort_by.replace('_', ' ')} (${filters.sort_order})`,
+        onRemove: () => setFilters((current) => ({ ...current, sort_by: 'created_at', sort_order: 'desc' })),
       });
     }
 
@@ -308,7 +310,18 @@ export function ContractsContent() {
               onChange={(value) =>
                 setFilters((current) => ({ ...current, sort_by: value, page: 1 }))
               }
+              showRelevance={!!filters.query}
             />
+
+            <select
+              value={filters.sort_order}
+              onChange={(e) => setFilters(prev => ({ ...prev, sort_order: e.target.value as 'asc' | 'desc', page: 1 }))}
+              className="px-3 py-2 rounded-lg border border-border bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
+            >
+              <option value="desc">Descending</option>
+              <option value="asc">Ascending</option>
+            </select>
+
             <button
               type="button"
               onClick={() => setMobileFiltersOpen(true)}
@@ -380,7 +393,7 @@ export function ContractsContent() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
-            {data.items.map((contract) => (
+            {data.items.map((contract: Contract) => (
               <ContractCard key={contract.id} contract={contract} />
             ))}
           </div>
@@ -392,12 +405,12 @@ export function ContractsContent() {
                   setFilters((current) => ({ ...current, page: Math.max(1, current.page - 1) }))
                 }
                 disabled={filters.page <= 1}
-                className="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                className="px-4 py-2 rounded-lg border border-border text-foreground disabled:opacity-50 disabled:cursor-not-allowed hover:bg-accent transition-colors"
               >
                 Previous
               </button>
 
-              <span className="text-sm text-gray-600 dark:text-gray-400">
+              <span className="text-sm text-muted-foreground">
                 Page {filters.page} of {data.total_pages}
               </span>
 
@@ -406,7 +419,7 @@ export function ContractsContent() {
                   setFilters((current) => ({ ...current, page: current.page + 1 }))
                 }
                 disabled={filters.page >= data.total_pages}
-                className="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                className="px-4 py-2 rounded-lg border border-border text-foreground disabled:opacity-50 disabled:cursor-not-allowed hover:bg-accent transition-colors"
               >
                 Next
               </button>
@@ -414,15 +427,15 @@ export function ContractsContent() {
           )}
         </>
       ) : (
-        <div className="text-center py-12 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800">
-          <Package className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-          <p className="text-gray-600 dark:text-gray-400 mb-4">
+        <div className="text-center py-12 bg-background rounded-xl border border-border shadow-sm">
+          <Package className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+          <p className="text-muted-foreground mb-4">
             No contracts found for the selected filters
           </p>
           <button
             type="button"
             onClick={clearAllFilters}
-            className="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+            className="px-4 py-2 rounded-lg border border-border text-foreground hover:bg-accent transition-colors"
           >
             Clear all filters
           </button>

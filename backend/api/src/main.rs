@@ -1,27 +1,21 @@
-mod aggregation;
-mod analytics;
-//mod audit_handlers;
-//mod audit_routes;
-//mod benchmark_engine;
-//mod benchmark_handlers;
-//mod benchmark_routes;
-mod cache;
-//mod cache_benchmark;
-//mod checklist;
-//mod detector;
-mod error;
-mod handlers;
-//mod multisig_handlers;
-//mod multisig_routes;
-//mod models;
-mod rate_limit;
 mod routes;
-//mod scoring;
+mod handlers;
+mod error;
 mod state;
+mod rate_limit;
+mod aggregation;
+// mod auth;
+// mod auth_handlers;
+mod cache;
+mod metrics_handler;
+mod metrics;
+// mod resource_handlers;
+// mod resource_tracking;
+mod analytics;
 
 use anyhow::Result;
-use axum::http::{header, HeaderValue, Method};
 use axum::{middleware, Router};
+use axum::http::{header, HeaderValue, Method};
 use dotenv::dotenv;
 use prometheus::Registry;
 use sqlx::postgres::PgPoolOptions;
@@ -66,7 +60,10 @@ async fn main() -> Result<()> {
 
     // Create prometheus registry for metrics
     let registry = Registry::new();
-
+    if let Err(e) = crate::metrics::register_all(&registry) {
+        tracing::error!("Failed to register metrics: {}", e);
+    }
+    
     // Create app state
     let state = AppState::new(pool, registry);
     let rate_limit_state = RateLimitState::from_env();
@@ -85,9 +82,6 @@ async fn main() -> Result<()> {
         .merge(routes::publisher_routes())
         .merge(routes::health_routes())
         .merge(routes::migration_routes())
-        //.merge(multisig_routes::multisig_routes())
-        //.merge(audit_routes::security_audit_routes())
-        //.merge(benchmark_routes::benchmark_routes())
         .fallback(handlers::route_not_found)
         .layer(middleware::from_fn(request_logger))
         .layer(middleware::from_fn_with_state(
@@ -114,18 +108,22 @@ async fn main() -> Result<()> {
 
 async fn request_logger(
     req: axum::http::Request<axum::body::Body>,
-    next: middleware::Next,
+    next: axum::middleware::Next,
 ) -> axum::response::Response {
+    let start = std::time::Instant::now();
     let method = req.method().clone();
     let uri = req.uri().clone();
-    let start = std::time::Instant::now();
 
-    let response = next.run(req).await;
+    let res = next.run(req).await;
+    let latency = start.elapsed();
 
-    let elapsed = start.elapsed().as_millis();
-    let status = response.status().as_u16();
+    tracing::debug!(
+        method = %method,
+        uri = %uri,
+        status = res.status().as_u16(),
+        latency = ?latency,
+        "request handled"
+    );
 
-    tracing::info!("{method} {uri} {status} {elapsed}ms");
-
-    response
+    res
 }

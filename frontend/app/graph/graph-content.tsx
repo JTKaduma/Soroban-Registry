@@ -65,6 +65,7 @@ export function GraphContent() {
     const [demoNodeCount, setDemoNodeCount] = useState(200);
     const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
     const [searchMatchIndex, setSearchMatchIndex] = useState(0);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const graphRef = useRef<any>(null);
 
     const { data: apiData, isLoading, error } = useQuery({

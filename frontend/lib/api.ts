@@ -88,12 +88,12 @@ export interface ContractSearchParams {
   language?: string;
   languages?: string[];
   author?: string;
-  sort_by?: "name" | "created_at" | "popularity" | "downloads";
-  sort_order?: "asc" | "desc";
   tags?: string[];
   maturity?: 'alpha' | 'beta' | 'stable' | 'mature' | 'legacy';
   page?: number;
   page_size?: number;
+  sort_by?: 'name' | 'created_at' | 'updated_at' | 'popularity' | 'deployments' | 'interactions' | 'relevance' | 'downloads';
+  sort_order?: 'asc' | 'desc';
 }
 
 export interface PublishRequest {

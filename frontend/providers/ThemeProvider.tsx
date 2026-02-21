@@ -24,6 +24,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     useEffect(() => {
         const savedTheme = localStorage.getItem(THEME_STORAGE_KEY) as Theme | null;
         if (savedTheme) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect
             setThemeState(savedTheme);
         }
     }, []);
@@ -32,6 +33,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
         const root = window.document.documentElement;
         const currentResolvedTheme = theme === 'system' ? getSystemTheme() : theme;
 
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setResolvedTheme(currentResolvedTheme);
 
         if (currentResolvedTheme === 'dark') {

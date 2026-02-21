@@ -58,8 +58,8 @@ export default function CodeRunner({ initialCode, language }: CodeRunnerProps) {
       console.error = originalError;
 
       setOutput(logs.join('\n') || 'Code executed successfully (no output).');
-    } catch (err: any) {
-      setOutput(`Execution Error: ${err.message}`);
+    } catch (err: unknown) {
+      setOutput(`Execution Error: ${(err as Error).message}`);
     } finally {
       setIsRunning(false);
     }
@@ -74,9 +74,8 @@ export default function CodeRunner({ initialCode, language }: CodeRunnerProps) {
             <button
               onClick={runCode}
               disabled={isRunning}
-              className={`px-3 py-1 rounded-md text-xs font-medium text-white transition-colors ${
-                isRunning ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700'
-              }`}
+              className={`px-3 py-1 rounded-md text-xs font-medium text-white transition-colors ${isRunning ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700'
+                }`}
             >
               {isRunning ? 'Running...' : 'Run Code'}
             </button>
