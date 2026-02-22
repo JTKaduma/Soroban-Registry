@@ -10,7 +10,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return children
 }
 export const useAnalytics = () => {
-  const logEvent = (name: string, params?: Record<string, any>) => {
+  const logEvent = (name: string, params?: Record<string, unknown>) => {
     trackEvent(name, params)
   }
 

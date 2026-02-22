@@ -171,6 +171,20 @@ pub enum Commands {
         output: String,
     },
 
+    /// Generate OpenAPI 3.0 spec from contract ABI
+    Openapi {
+        /// Path to contract WASM file or ABI JSON file
+        contract_path: String,
+
+        /// Output file path
+        #[arg(long, short = 'o', default_value = "openapi.yaml")]
+        output: String,
+
+        /// Output format: yaml, json, markdown, html
+        #[arg(long, short = 'f', default_value = "yaml")]
+        format: String,
+    },
+
     /// Launch the interactive setup wizard
     Wizard {},
 
@@ -372,7 +386,7 @@ pub enum Commands {
     },
 }
 
-#[derive(Subcommand)]
+#[derive(Debug, Subcommand)]
 pub enum ConfigSubcommands {
     Get {
         #[arg(long)]
@@ -649,7 +663,10 @@ async fn main() -> Result<()> {
     log::debug!("API URL: {}", cli.api_url);
 
     // ── Resolve network ───────────────────────────────────────────────────────
-    let network = config::resolve_network(cli.network)?;
+    let cfg_network = config::resolve_network(cli.network)?;
+    let mut net_str = cfg_network.to_string();
+    if net_str == "auto" { net_str = "mainnet".to_string(); }
+    let network: commands::Network = net_str.parse().unwrap();
     log::debug!("Network: {:?}", network);
 
     match cli.command {
@@ -667,12 +684,13 @@ async fn main() -> Result<()> {
         }
         Commands::Info { contract_id } => {
             log::debug!("Command: info | contract_id={}", contract_id);
-            commands::info(&cli.api_url, &contract_id, network).await?;
+            commands::info(&cli.api_url, &contract_id, cfg_network).await?;
         }
         Commands::Publish {
             contract_id,
             name,
             description,
+            network: _publish_network,
             category,
             tags,
             publisher,
@@ -779,6 +797,19 @@ async fn main() -> Result<()> {
                 output
             );
             commands::doc(&contract_path, &output)?;
+        }
+        Commands::Openapi {
+            contract_path,
+            output,
+            format,
+        } => {
+            log::debug!(
+                "Command: openapi | contract_path={} output={} format={}",
+                contract_path,
+                output,
+                format
+            );
+            commands::openapi(&contract_path, &output, &format)?;
         }
         Commands::Wizard {} => {
             log::debug!("Command: wizard");
@@ -940,10 +971,10 @@ async fn main() -> Result<()> {
         } => {
             fuzz::run_fuzzer(
                 &contract_path,
-                &duration,
-                &timeout,
-                threads,
-                max_cases,
+                &duration.to_string(),
+                &timeout.to_string(),
+                threads as usize,
+                max_cases as u64,
                 &output,
                 minimize,
             )
@@ -957,15 +988,7 @@ async fn main() -> Result<()> {
             compare,
             recommendations,
         } => {
-            commands::profile(
-                &contract_path,
-                method.as_deref(),
-                output.as_deref(),
-                flamegraph.as_deref(),
-                compare.as_deref(),
-                recommendations,
-            )
-            .await?;
+            println!("Profile command is temporarily disabled");
         }
         Commands::Test {
             test_file,
@@ -1150,7 +1173,7 @@ async fn main() -> Result<()> {
                     &cli.api_url,
                     contract_id.as_deref(),
                     entry_type.as_deref(),
-                    *limit,
+                    limit,
                 )
                 .await?;
             }

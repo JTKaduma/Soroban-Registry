@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api, ContractSearchParams, Contract } from '@/lib/api';
 import ContractCard from '@/components/ContractCard';
@@ -10,13 +10,9 @@ import { FilterPanel } from '@/components/contracts/FilterPanel';
 import { ResultsCount } from '@/components/contracts/ResultsCount';
 import { SearchBar } from '@/components/contracts/SearchBar';
 import { SortDropdown, SortBy } from '@/components/contracts/SortDropdown';
-import { Filter, Package, SlidersHorizontal, X, ArrowUpDown } from 'lucide-react';
+import { Filter, Package, SlidersHorizontal, X } from 'lucide-react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-<<<<<<< HEAD
-import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAnalytics } from '@/hooks/useAnalytics';
-=======
->>>>>>> bf33e5b9ccbaba0b83d5ef0ac28d977a2cdc6198
 
 const DEFAULT_PAGE_SIZE = 12;
 const CATEGORY_OPTIONS = [
@@ -479,7 +475,6 @@ export function ContractsContent() {
           </p>
           <button
             type="button"
-<<<<<<< HEAD
             onClick={() => {
               logEvent('search_performed', {
                 keyword: '',
@@ -487,11 +482,7 @@ export function ContractsContent() {
               });
               clearAllFilters();
             }}
-            className="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
-=======
-            onClick={clearAllFilters}
             className="px-4 py-2 rounded-lg border border-border text-foreground hover:bg-accent transition-colors"
->>>>>>> bf33e5b9ccbaba0b83d5ef0ac28d977a2cdc6198
           >
             Clear all filters
           </button>

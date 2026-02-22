@@ -2,7 +2,6 @@ import {
   MOCK_CONTRACTS,
   MOCK_EXAMPLES,
   MOCK_VERSIONS,
-  MOCK_TEMPLATES,
 } from "./mock-data";
 import { trackEvent } from "./analytics";
 import {
@@ -229,6 +228,8 @@ export interface MetricSeriesResponse {
   resolution: 'hour' | 'day' | 'raw';
   points?: MetricSeriesPoint[];
   samples?: MetricSample[];
+}
+
 export type DeprecationStatus = 'active' | 'deprecated' | 'retired';
 
 export interface DeprecationInfo {
@@ -469,7 +470,7 @@ export const api = {
     );
 
     const url = new URL(`${API_URL}/api/contracts/${id}`);
-    if (network) url.searchParams.set("network", network);
+    if (network != null) url.searchParams.set("network", String(network));
     const response = await fetch(url.toString());
     if (!response.ok) throw new Error("Failed to fetch contract");
     return response.json();
@@ -818,22 +819,10 @@ export const api = {
     const queryParams = new URLSearchParams();
     if (network) queryParams.append("network", network);
     const qs = queryParams.toString();
-    const response = await fetch(
-      `${API_URL}/api/contracts/graph${qs ? `?${qs}` : ""}`,
-    );
-
     return handleApiCall<GraphResponse>(
       () => fetch(`${API_URL}/api/contracts/graph${qs ? `?${qs}` : ""}`),
       '/api/contracts/graph'
     );
-    const response = await fetch(`${API_URL}/api/contracts/graph${qs ? `?${qs}` : ""}`);
-    if (!response.ok) throw new Error("Failed to fetch contract graph");
-    const data = await response.json();
-    const raw = data?.graph ?? data;
-    return {
-      nodes: Array.isArray(raw?.nodes) ? raw.nodes : [],
-      edges: Array.isArray(raw?.edges) ? raw.edges : [],
-    };
   },
 
   async getTemplates(): Promise<Template[]> {

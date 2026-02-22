@@ -1,5 +1,5 @@
 [workspace]
-members = ["api", "indexer", "verifier", "shared", "seeder"]
+members = ["api", "indexer", "verifier", "shared", "seeder", "contract_abi"]
 resolver = "2"
 
 [workspace.package]
