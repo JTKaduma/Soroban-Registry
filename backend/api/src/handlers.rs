@@ -9,6 +9,11 @@ use axum::{
 };
 use serde_json::{json, Value};
 use shared::{
+    Contract, ContractAnalyticsResponse, ContractGetResponse, ContractSearchParams,
+    ContractVersion, CreateInteractionBatchRequest, CreateInteractionRequest,
+    ContractInteractionResponse, DeploymentStats, InteractionsListResponse,
+    InteractionsQueryParams, InteractorStats, Network, NetworkConfig,
+    PaginatedResponse, PublishRequest, Publisher, TimelineEntry, TopUser,
     Contract,ContractGetResponse, ContractSearchParams, ContractVersion, Network, NetworkConfig, CreateContractVersionRequest, PaginatedResponse, PublishRequest, Publisher,
     SemVer,
 };
@@ -666,8 +671,97 @@ pub async fn update_contract_state() -> impl IntoResponse {
     Json(json!({"success": true}))
 }
 
-pub async fn get_contract_analytics() -> impl IntoResponse {
-    Json(json!({"analytics": {}}))
+/// GET /api/contracts/:id/analytics — timeline and top users from contract_interactions (Issue #46).
+pub async fn get_contract_analytics(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<ContractAnalyticsResponse>> {
+    let contract_uuid = Uuid::parse_str(&id).map_err(|_| {
+        ApiError::bad_request(
+            "InvalidContractId",
+            format!("Invalid contract ID format: {}", id),
+        )
+    })?;
+
+    let _contract: Contract = sqlx::query_as("SELECT id FROM contracts WHERE id = $1")
+        .bind(contract_uuid)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|err| match err {
+            sqlx::Error::RowNotFound => ApiError::not_found(
+                "ContractNotFound",
+                format!("No contract found with ID: {}", id),
+            ),
+            _ => db_internal_error("get contract for analytics", err),
+        })?;
+
+    let thirty_days_ago = chrono::Utc::now() - chrono::Duration::days(30);
+
+    let unique_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(DISTINCT user_address) FROM contract_interactions \
+         WHERE contract_id = $1 AND user_address IS NOT NULL",
+    )
+    .bind(contract_uuid)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| db_internal_error("analytics unique interactors", e))?;
+
+    let top_user_rows: Vec<(Option<String>, i64)> = sqlx::query_as(
+        "SELECT user_address, COUNT(*) AS cnt FROM contract_interactions \
+         WHERE contract_id = $1 AND user_address IS NOT NULL \
+         GROUP BY user_address ORDER BY cnt DESC LIMIT 10",
+    )
+    .bind(contract_uuid)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| db_internal_error("analytics top users", e))?;
+
+    let top_users: Vec<TopUser> = top_user_rows
+        .into_iter()
+        .filter_map(|(addr, count)| addr.map(|a| TopUser { address: a, count }))
+        .collect();
+
+    let timeline_rows: Vec<(chrono::NaiveDate, i64)> = sqlx::query_as(
+        r#"
+        SELECT d::date AS date, COALESCE(e.cnt, 0)::bigint AS count
+        FROM generate_series(
+            ($1::timestamptz)::date,
+            CURRENT_DATE,
+            '1 day'::interval
+        ) d
+        LEFT JOIN (
+            SELECT created_at::date AS event_date, COUNT(*) AS cnt
+            FROM contract_interactions
+            WHERE contract_id = $2 AND created_at >= $1
+            GROUP BY created_at::date
+        ) e ON d::date = e.event_date
+        ORDER BY d::date
+        "#,
+    )
+    .bind(thirty_days_ago)
+    .bind(contract_uuid)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| db_internal_error("analytics timeline", e))?;
+
+    let timeline: Vec<TimelineEntry> = timeline_rows
+        .into_iter()
+        .map(|(date, count)| TimelineEntry { date, count })
+        .collect();
+
+    Ok(Json(ContractAnalyticsResponse {
+        contract_id: contract_uuid,
+        deployments: DeploymentStats {
+            count: 0,
+            unique_users: 0,
+            by_network: serde_json::json!({}),
+        },
+        interactors: InteractorStats {
+            unique_count,
+            top_users,
+        },
+        timeline,
+    }))
 }
 
 pub async fn get_trust_score() -> impl IntoResponse {
@@ -704,6 +798,242 @@ pub async fn deploy_green() -> impl IntoResponse {
 
 pub async fn get_contract_performance() -> impl IntoResponse {
     Json(json!({"performance": {}}))
+}
+
+// ─── Contract interaction history (Issue #46) ─────────────────────────────────
+
+/// GET /api/contracts/:id/interactions — list with optional filters (account, method, date range).
+pub async fn get_contract_interactions(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(params): Query<InteractionsQueryParams>,
+) -> ApiResult<Json<InteractionsListResponse>> {
+    let contract_uuid = Uuid::parse_str(&id).map_err(|_| {
+        ApiError::bad_request(
+            "InvalidContractId",
+            format!("Invalid contract ID format: {}", id),
+        )
+    })?;
+
+    let _contract: Contract = sqlx::query_as("SELECT id FROM contracts WHERE id = $1")
+        .bind(contract_uuid)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|err| match err {
+            sqlx::Error::RowNotFound => ApiError::not_found(
+                "ContractNotFound",
+                format!("No contract found with ID: {}", id),
+            ),
+            _ => db_internal_error("get contract for interactions", err),
+        })?;
+
+    let limit = params.limit.min(100).max(1);
+    let offset = params.offset.max(0);
+
+    let from_ts = params
+        .from_timestamp
+        .as_deref()
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|dt| dt.with_timezone(&chrono::Utc));
+    let to_ts = params
+        .to_timestamp
+        .as_deref()
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|dt| dt.with_timezone(&chrono::Utc));
+
+    let rows: Vec<shared::ContractInteraction> = sqlx::query_as(
+        r#"
+        SELECT id, contract_id, user_address, interaction_type, transaction_hash,
+               method, parameters, return_value, created_at
+        FROM contract_interactions
+        WHERE contract_id = $1
+          AND ($2::text IS NULL OR user_address = $2)
+          AND ($3::text IS NULL OR method = $3)
+          AND ($4::timestamptz IS NULL OR created_at >= $4)
+          AND ($5::timestamptz IS NULL OR created_at <= $5)
+        ORDER BY created_at DESC
+        LIMIT $6 OFFSET $7
+        "#,
+    )
+    .bind(contract_uuid)
+    .bind(params.account.as_deref())
+    .bind(params.method.as_deref())
+    .bind(from_ts)
+    .bind(to_ts)
+    .bind(limit)
+    .bind(offset)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|err| db_internal_error("list contract interactions", err))?;
+
+    let total: i64 = sqlx::query_scalar(
+        r#"
+        SELECT COUNT(*) FROM contract_interactions
+        WHERE contract_id = $1
+          AND ($2::text IS NULL OR user_address = $2)
+          AND ($3::text IS NULL OR method = $3)
+          AND ($4::timestamptz IS NULL OR created_at >= $4)
+          AND ($5::timestamptz IS NULL OR created_at <= $5)
+        "#,
+    )
+    .bind(contract_uuid)
+    .bind(params.account.as_deref())
+    .bind(params.method.as_deref())
+    .bind(from_ts)
+    .bind(to_ts)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|err| db_internal_error("count contract interactions", err))?;
+
+    let items: Vec<ContractInteractionResponse> = rows
+        .into_iter()
+        .map(|r| ContractInteractionResponse {
+            id: r.id,
+            account: r.user_address,
+            method: r.method,
+            parameters: r.parameters,
+            return_value: r.return_value,
+            transaction_hash: r.transaction_hash,
+            created_at: r.created_at,
+        })
+        .collect();
+
+    Ok(Json(InteractionsListResponse {
+        items,
+        total,
+        limit,
+        offset,
+    }))
+}
+
+/// POST /api/contracts/:id/interactions — ingest one interaction.
+pub async fn post_contract_interaction(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    payload: Result<Json<CreateInteractionRequest>, JsonRejection>,
+) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
+    let Json(req) = payload.map_err(map_json_rejection)?;
+
+    let contract_uuid = Uuid::parse_str(&id).map_err(|_| {
+        ApiError::bad_request(
+            "InvalidContractId",
+            format!("Invalid contract ID format: {}", id),
+        )
+    })?;
+
+    let _contract: Contract = sqlx::query_as("SELECT id FROM contracts WHERE id = $1")
+        .bind(contract_uuid)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|err| match err {
+            sqlx::Error::RowNotFound => ApiError::not_found(
+                "ContractNotFound",
+                format!("No contract found with ID: {}", id),
+            ),
+            _ => db_internal_error("get contract for interaction", err),
+        })?;
+
+    let interaction_type = req
+        .method
+        .as_deref()
+        .unwrap_or("invocation");
+    let created_at = req.timestamp.unwrap_or_else(chrono::Utc::now);
+
+    let row: (Uuid,) = sqlx::query_as(
+        r#"
+        INSERT INTO contract_interactions
+          (contract_id, user_address, interaction_type, transaction_hash, method, parameters, return_value, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        RETURNING id
+        "#,
+    )
+    .bind(contract_uuid)
+    .bind(req.account.as_deref())
+    .bind(interaction_type)
+    .bind(req.transaction_hash.as_deref())
+    .bind(req.method.as_deref())
+    .bind(req.parameters.as_ref())
+    .bind(req.return_value.as_ref())
+    .bind(created_at)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|err| db_internal_error("insert contract interaction", err))?;
+
+    tracing::info!(
+        contract_id = %id,
+        interaction_id = %row.0,
+        "contract interaction logged"
+    );
+
+    Ok((
+        StatusCode::CREATED,
+        Json(serde_json::json!({ "id": row.0 })),
+    ))
+}
+
+/// POST /api/contracts/:id/interactions/batch — ingest multiple interactions.
+pub async fn post_contract_interactions_batch(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    payload: Result<Json<CreateInteractionBatchRequest>, JsonRejection>,
+) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
+    let Json(req) = payload.map_err(map_json_rejection)?;
+
+    let contract_uuid = Uuid::parse_str(&id).map_err(|_| {
+        ApiError::bad_request(
+            "InvalidContractId",
+            format!("Invalid contract ID format: {}", id),
+        )
+    })?;
+
+    let _contract: Contract = sqlx::query_as("SELECT id FROM contracts WHERE id = $1")
+        .bind(contract_uuid)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|err| match err {
+            sqlx::Error::RowNotFound => ApiError::not_found(
+                "ContractNotFound",
+                format!("No contract found with ID: {}", id),
+            ),
+            _ => db_internal_error("get contract for interactions batch", err),
+        })?;
+
+    let mut ids = Vec::with_capacity(req.interactions.len());
+    for i in &req.interactions {
+        let interaction_type = i.method.as_deref().unwrap_or("invocation");
+        let created_at = i.timestamp.unwrap_or_else(chrono::Utc::now);
+        let row: (Uuid,) = sqlx::query_as(
+            r#"
+            INSERT INTO contract_interactions
+              (contract_id, user_address, interaction_type, transaction_hash, method, parameters, return_value, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            RETURNING id
+            "#,
+        )
+        .bind(contract_uuid)
+        .bind(i.account.as_deref())
+        .bind(interaction_type)
+        .bind(i.transaction_hash.as_deref())
+        .bind(i.method.as_deref())
+        .bind(i.parameters.as_ref())
+        .bind(i.return_value.as_ref())
+        .bind(created_at)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|err| db_internal_error("insert contract interaction batch", err))?;
+        ids.push(row.0);
+    }
+
+    tracing::info!(
+        contract_id = %id,
+        count = ids.len(),
+        "contract interactions batch logged"
+    );
+
+    Ok((
+        StatusCode::CREATED,
+        Json(serde_json::json!({ "ids": ids })),
+    ))
 }
 
 pub async fn route_not_found() -> impl IntoResponse {

@@ -5,7 +5,12 @@ import { api, GraphNode, GraphEdge } from '@/lib/api';
 import DependencyGraph from '@/components/DependencyGraph';
 import GraphControls from '@/components/GraphControls';
 import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
+<<<<<<< HEAD
+import { AlertCircle, Sparkles } from 'lucide-react';
+import { useAnalytics } from '@/hooks/useAnalytics';
+=======
 import { AlertCircle, Sparkles, ExternalLink, X } from 'lucide-react';
+>>>>>>> bf33e5b9ccbaba0b83d5ef0ac28d977a2cdc6198
 
 // Generate synthetic demo data for testing at scale
 function generateDemoData(nodeCount: number): { nodes: GraphNode[]; edges: GraphEdge[] } {
@@ -65,14 +70,38 @@ export function GraphContent() {
     const [demoNodeCount, setDemoNodeCount] = useState(200);
     const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
     const [searchMatchIndex, setSearchMatchIndex] = useState(0);
+<<<<<<< HEAD
+    const graphRef = useRef<DependencyGraphHandle | null>(null);
+    const { logEvent } = useAnalytics();
+=======
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const graphRef = useRef<any>(null);
+>>>>>>> bf33e5b9ccbaba0b83d5ef0ac28d977a2cdc6198
 
     const { data: apiData, isLoading, error } = useQuery({
         queryKey: ['contract-graph', networkFilter],
         queryFn: () => api.getContractGraph(networkFilter || undefined),
         enabled: !demoMode,
     });
+
+    useEffect(() => {
+        if (!error) return;
+        logEvent('error_event', {
+            source: 'graph_page',
+            message: 'Failed to load contract graph data',
+            network_filter: networkFilter || 'all',
+        });
+    }, [error, networkFilter, logEvent]);
+
+    useEffect(() => {
+        if (!searchQuery.trim()) return;
+        logEvent('search_performed', {
+            keyword: searchQuery.trim(),
+            source: 'graph_page',
+            network_filter: networkFilter || 'all',
+            demo_mode: demoMode,
+        });
+    }, [searchQuery, networkFilter, demoMode, logEvent]);
 
     const demoData = useMemo(
         () => (demoMode ? generateDemoData(demoNodeCount) : null),

@@ -389,6 +389,79 @@ impl<T> PaginatedResponse<T> {
     }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// CONTRACT INTERACTION HISTORY (Issue #46)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// One contract invocation row (DB)
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct ContractInteraction {
+    pub id: Uuid,
+    pub contract_id: Uuid,
+    pub user_address: Option<String>,
+    pub interaction_type: String,
+    pub transaction_hash: Option<String>,
+    pub method: Option<String>,
+    pub parameters: Option<serde_json::Value>,
+    pub return_value: Option<serde_json::Value>,
+    pub created_at: DateTime<Utc>,
+}
+
+/// Response item for GET /api/contracts/:id/interactions
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContractInteractionResponse {
+    pub id: Uuid,
+    pub account: Option<String>,
+    pub method: Option<String>,
+    pub parameters: Option<serde_json::Value>,
+    pub return_value: Option<serde_json::Value>,
+    pub transaction_hash: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+/// Query params for GET /api/contracts/:id/interactions
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InteractionsQueryParams {
+    #[serde(default = "default_interactions_limit")]
+    pub limit: i64,
+    #[serde(default)]
+    pub offset: i64,
+    pub account: Option<String>,
+    pub method: Option<String>,
+    pub from_timestamp: Option<String>,
+    pub to_timestamp: Option<String>,
+}
+
+fn default_interactions_limit() -> i64 {
+    50
+}
+
+/// Request body for POST /api/contracts/:id/interactions (single)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateInteractionRequest {
+    pub account: Option<String>,
+    pub method: Option<String>,
+    pub transaction_hash: Option<String>,
+    pub parameters: Option<serde_json::Value>,
+    pub return_value: Option<serde_json::Value>,
+    pub timestamp: Option<DateTime<Utc>>,
+}
+
+/// Request body for POST /api/contracts/:id/interactions/batch
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateInteractionBatchRequest {
+    pub interactions: Vec<CreateInteractionRequest>,
+}
+
+/// Paginated interactions response
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InteractionsListResponse {
+    pub items: Vec<ContractInteractionResponse>,
+    pub total: i64,
+    pub limit: i64,
+    pub offset: i64,
+}
+
 /// Migration status
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type, PartialEq)]
 #[sqlx(type_name = "migration_status", rename_all = "snake_case")]

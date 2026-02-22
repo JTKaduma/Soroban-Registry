@@ -16,8 +16,12 @@ import {
   GitCompare,
 } from "lucide-react";
 import Link from "next/link";
+import { useParams } from "next/navigation";
+import { useAnalytics } from "@/hooks/useAnalytics";
+import { useEffect } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import FormalVerificationPanel from "@/components/FormalVerificationPanel";
+import InteractionHistorySection from "@/components/InteractionHistorySection";
 import Navbar from "@/components/Navbar";
 import MaintenanceBanner from "@/components/MaintenanceBanner";
 import { useQueryClient } from "@tanstack/react-query";
@@ -28,7 +32,6 @@ const NETWORKS: Network[] = ["mainnet", "testnet", "futurenet"];
 
 // Mock for maintenance status since it was missing in the original file view but used in code
 const maintenanceStatus = { is_maintenance: false, current_window: null };
-
 function ContractDetailsContent() {
   const params = useParams();
   const searchParams = useSearchParams();
@@ -52,6 +55,16 @@ function ContractDetailsContent() {
     queryFn: () => api.getContractDependencies(id),
     enabled: !!contract,
   });
+  const { logEvent } = useAnalytics();
+
+  useEffect(() => {
+    if (!error) return;
+    logEvent("error_event", {
+      source: "contract_details",
+      contract_id: id,
+      message: "Failed to load contract details",
+    });
+  }, [error, id, logEvent]);
 
   const { data: deprecationInfo } = useQuery({
     queryKey: ["contract-deprecation", id],
@@ -193,8 +206,13 @@ function ContractDetailsContent() {
             <ExampleGallery contractId={contract.id} />
           </section>
 
+<<<<<<< feature/issue-46-add-contract-interaction-history-tracking
+          {/* Interaction History (Issue #46) */}
+          <InteractionHistorySection contractId={contract.id} />
+=======
           {/* Custom Metrics */}
           <CustomMetricsPanel contractId={contract.id} />
+>>>>>>> main
         </div>
 
         {/* Sidebar */}

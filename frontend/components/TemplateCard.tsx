@@ -1,6 +1,9 @@
+'use client';
+
 import Link from 'next/link';
 import { Download, Tag } from 'lucide-react';
 import { Template } from '@/lib/api';
+import { useAnalytics } from '@/hooks/useAnalytics';
 
 const CATEGORY_COLORS: Record<string, string> = {
     token: 'bg-blue-500/10 text-blue-600 border-blue-500/20',
@@ -12,9 +15,21 @@ const CATEGORY_COLORS: Record<string, string> = {
 
 export default function TemplateCard({ template }: { template: Template }) {
     const colorClass = CATEGORY_COLORS[template.category] ?? 'bg-gray-500/10 text-gray-600 border-gray-500/20';
+    const { logEvent } = useAnalytics();
 
     return (
-        <Link href={`/templates/${template.slug}`}>
+        <Link
+            href={`/templates/${template.slug}`}
+            onClick={() =>
+                logEvent('template_used', {
+                    template_id: template.id,
+                    template_slug: template.slug,
+                    template_name: template.name,
+                    category: template.category,
+                    version: template.version,
+                })
+            }
+        >
             <div className="group relative overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 transition-all hover:border-blue-500/50 hover:shadow-lg hover:shadow-blue-500/10 cursor-pointer">
                 <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 to-purple-500/5 opacity-0 transition-opacity group-hover:opacity-100" />
 

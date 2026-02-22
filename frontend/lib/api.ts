@@ -4,6 +4,7 @@ import {
   MOCK_VERSIONS,
   MOCK_TEMPLATES,
 } from "./mock-data";
+import { trackEvent } from "./analytics";
 import {
   ApiError,
   NetworkError,
@@ -60,6 +61,61 @@ export interface ContractHealth {
   total_score: number;
   recommendations: string[];
   updated_at: string;
+}
+
+export interface ContractInteractionResponse {
+  id: string;
+  account: string | null;
+  method: string | null;
+  parameters: unknown;
+  return_value: unknown;
+  transaction_hash: string | null;
+  created_at: string;
+}
+
+export interface InteractionsQueryParams {
+  limit?: number;
+  offset?: number;
+  account?: string;
+  method?: string;
+  from_timestamp?: string;
+  to_timestamp?: string;
+}
+
+export interface InteractionsListResponse {
+  items: ContractInteractionResponse[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+/** Analytics timeline entry (one day) */
+export interface TimelineEntry {
+  date: string;
+  count: number;
+}
+
+export interface TopUser {
+  address: string;
+  count: number;
+}
+
+export interface InteractorStats {
+  unique_count: number;
+  top_users: TopUser[];
+}
+
+export interface DeploymentStats {
+  count: number;
+  unique_users: number;
+  by_network: Record<string, number>;
+}
+
+export interface ContractAnalyticsResponse {
+  contract_id: string;
+  deployments: DeploymentStats;
+  interactors: InteractorStats;
+  timeline: TimelineEntry[];
 }
 
 export interface ContractVersion {
@@ -488,11 +544,72 @@ export const api = {
     );
   },
 
+  async getContractInteractions(
+    id: string,
+    params?: InteractionsQueryParams,
+  ): Promise<InteractionsListResponse> {
+    const search = new URLSearchParams();
+    if (params?.limit != null) search.set("limit", String(params.limit));
+    if (params?.offset != null) search.set("offset", String(params.offset));
+    if (params?.account) search.set("account", params.account);
+    if (params?.method) search.set("method", params.method);
+    if (params?.from_timestamp) search.set("from_timestamp", params.from_timestamp);
+    if (params?.to_timestamp) search.set("to_timestamp", params.to_timestamp);
+    const qs = search.toString();
+    const response = await fetch(
+      `${API_URL}/api/contracts/${id}/interactions${qs ? `?${qs}` : ""}`,
+    );
+    if (!response.ok) throw new Error("Failed to fetch contract interactions");
+    return response.json();
+  },
+
+  async getContractAnalytics(id: string): Promise<ContractAnalyticsResponse> {
+    const response = await fetch(`${API_URL}/api/contracts/${id}/analytics`);
+    if (!response.ok) throw new Error("Failed to fetch contract analytics");
+    return response.json();
+  },
+
   async publishContract(data: PublishRequest): Promise<Contract> {
     if (USE_MOCKS) {
+      if (typeof window !== "undefined") {
+        trackEvent("contract_publish_failed", {
+          network: data.network,
+          name: data.name,
+          reason: "mock_mode_not_supported",
+        });
+      }
       throw new Error("Publishing is not supported in mock mode");
     }
 
+    try {
+      const response = await fetch(`${API_URL}/api/contracts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!response.ok) throw new Error("Failed to publish contract");
+
+      const published = await response.json();
+      if (typeof window !== "undefined") {
+        trackEvent("contract_published", {
+          contract_id: data.contract_id,
+          name: data.name,
+          network: data.network,
+          category: data.category,
+        });
+      }
+
+      return published;
+    } catch (error) {
+      if (typeof window !== "undefined") {
+        trackEvent("contract_publish_failed", {
+          contract_id: data.contract_id,
+          name: data.name,
+          network: data.network,
+        });
+      }
+      throw error;
+    }
     return handleApiCall<Contract>(
       () => fetch(`${API_URL}/api/contracts`, {
         method: "POST",
@@ -703,6 +820,9 @@ export const api = {
     const queryParams = new URLSearchParams();
     if (network) queryParams.append("network", network);
     const qs = queryParams.toString();
+    const response = await fetch(
+      `${API_URL}/api/contracts/graph${qs ? `?${qs}` : ""}`,
+    );
 
     return handleApiCall<GraphResponse>(
       () => fetch(`${API_URL}/api/contracts/graph${qs ? `?${qs}` : ""}`),
