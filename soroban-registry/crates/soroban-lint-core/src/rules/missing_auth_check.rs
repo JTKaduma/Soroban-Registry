@@ -74,4 +74,18 @@ mod tests {
         let rule = MissingAuthCheckRule;
         assert_eq!(rule.rule_id(), "missing_auth_check");
     }
+
+    #[test]
+    fn flags_missing_auth_on_transfer() {
+        let source = r#"
+            use soroban_sdk::{Env, Address, Symbol};
+            pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
+                env.storage().persistent().set(&Symbol::new(&env, "balance"), &amount);
+            }
+        "#;
+        let syntax = syn::parse_file(source).expect("valid syntax");
+        let rule = MissingAuthCheckRule;
+        let diags = rule.check("test.rs", &syntax);
+        assert!(!diags.is_empty());
+    }
 }
