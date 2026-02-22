@@ -109,11 +109,29 @@ export default function ExampleCard({ example }: ExampleCardProps) {
         )}
 
         {effectiveTab === 'js' && example.code_js && (
-          <CodeRunner initialCode={example.code_js} language="javascript" />
+          <CodeRunner
+            initialCode={example.code_js}
+            language="javascript"
+            // Sent with copy events so analytics can identify the source example.
+            copyAnalytics={{
+              contractId: example.contract_id,
+              exampleId: example.id,
+              exampleTitle: example.title,
+            }}
+          />
         )}
 
         {effectiveTab === 'rust' && example.code_rust && (
-          <CodeRunner initialCode={example.code_rust} language="rust" />
+          <CodeRunner
+            initialCode={example.code_rust}
+            language="rust"
+            // Same metadata for Rust tab copies.
+            copyAnalytics={{
+              contractId: example.contract_id,
+              exampleId: example.id,
+              exampleTitle: example.title,
+            }}
+          />
         )}
       </div>
     </div>

@@ -4,6 +4,7 @@ import {
   MOCK_VERSIONS,
   MOCK_TEMPLATES,
 } from "./mock-data";
+import { trackEvent } from "./analytics";
 import {
   ApiError,
   NetworkError,
@@ -488,9 +489,45 @@ export const api = {
 
   async publishContract(data: PublishRequest): Promise<Contract> {
     if (USE_MOCKS) {
+      if (typeof window !== "undefined") {
+        trackEvent("contract_publish_failed", {
+          network: data.network,
+          name: data.name,
+          reason: "mock_mode_not_supported",
+        });
+      }
       throw new Error("Publishing is not supported in mock mode");
     }
 
+    try {
+      const response = await fetch(`${API_URL}/api/contracts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!response.ok) throw new Error("Failed to publish contract");
+
+      const published = await response.json();
+      if (typeof window !== "undefined") {
+        trackEvent("contract_published", {
+          contract_id: data.contract_id,
+          name: data.name,
+          network: data.network,
+          category: data.category,
+        });
+      }
+
+      return published;
+    } catch (error) {
+      if (typeof window !== "undefined") {
+        trackEvent("contract_publish_failed", {
+          contract_id: data.contract_id,
+          name: data.name,
+          network: data.network,
+        });
+      }
+      throw error;
+    }
     return handleApiCall<Contract>(
       () => fetch(`${API_URL}/api/contracts`, {
         method: "POST",
@@ -701,6 +738,9 @@ export const api = {
     const queryParams = new URLSearchParams();
     if (network) queryParams.append("network", network);
     const qs = queryParams.toString();
+    const response = await fetch(
+      `${API_URL}/api/contracts/graph${qs ? `?${qs}` : ""}`,
+    );
 
     return handleApiCall<GraphResponse>(
       () => fetch(`${API_URL}/api/contracts/graph${qs ? `?${qs}` : ""}`),
