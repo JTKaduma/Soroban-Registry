@@ -1425,15 +1425,19 @@ name = "indexer"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
+ "clap",
  "dotenv",
  "reqwest",
  "serde",
  "serde_json",
  "shared",
  "sqlx",
+ "thiserror 1.0.69",
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
