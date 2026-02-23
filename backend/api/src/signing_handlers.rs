@@ -2,14 +2,14 @@ use axum::{
     extract::{Path, Query, State},
     Json,
 };
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use chrono::Utc;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use shared::{
     ChainOfCustodyEntry, ChainOfCustodyResponse, PackageSignature, RevokeSignatureRequest,
-    SignatureStatus, SignPackageRequest, TransparencyEntryType, TransparencyLogEntry,
+    SignPackageRequest, SignatureStatus, TransparencyEntryType, TransparencyLogEntry,
     TransparencyLogQueryParams, VerifySignatureRequest, VerifySignatureResponse,
 };
 use uuid::Uuid;
@@ -27,7 +27,7 @@ fn map_json_rejection(err: axum::extract::rejection::JsonRejection) -> ApiError 
     )
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, serde::Serialize)]
 pub struct SignRequest {
     pub contract_id: String,
     pub version: String,
@@ -47,15 +47,24 @@ pub async fn sign_package(
     let Json(req) = payload.map_err(map_json_rejection)?;
 
     if req.contract_id.is_empty() {
-        return Err(ApiError::bad_request("MissingContractId", "contract_id is required"));
+        return Err(ApiError::bad_request(
+            "MissingContractId",
+            "contract_id is required",
+        ));
     }
     if req.signature.is_empty() {
-        return Err(ApiError::bad_request("MissingSignature", "signature is required"));
+        return Err(ApiError::bad_request(
+            "MissingSignature",
+            "signature is required",
+        ));
     }
 
     let contract_uuid = parse_contract_uuid(&state, &req.contract_id).await?;
 
-    let algorithm = req.algorithm.unwrap_or_else(|| "ed25519".to_string());
+    let algorithm = req
+        .algorithm
+        .clone()
+        .unwrap_or_else(|| "ed25519".to_string());
 
     let signature: PackageSignature = sqlx::query_as(
         r#"
@@ -73,7 +82,7 @@ pub async fn sign_package(
     .bind(&req.public_key)
     .bind(&algorithm)
     .bind(req.expires_at)
-    .bind(req.metadata)
+    .bind(req.metadata.clone())
     .fetch_one(&state.db)
     .await
     .map_err(|err| db_internal_error("create package signature", err))?;
@@ -86,7 +95,7 @@ pub async fn sign_package(
     );
 
     let _prev_hash: Option<String> = sqlx::query_scalar(
-        "SELECT entry_hash FROM transparency_log ORDER BY timestamp DESC LIMIT 1"
+        "SELECT entry_hash FROM transparency_log ORDER BY timestamp DESC LIMIT 1",
     )
     .fetch_optional(&state.db)
     .await
@@ -194,8 +203,9 @@ async fn verify_signature_locally(
             let verifying_key = VerifyingKey::from_bytes(&pk_array)
                 .map_err(|_| ApiError::internal("Invalid verifying key"))?;
 
-            let message = create_signing_message(&req.wasm_hash, &req.contract_id, db_sig.version.as_str());
-            
+            let message =
+                create_signing_message(&req.wasm_hash, &req.contract_id, db_sig.version.as_str());
+
             let crypto_valid = verifying_key.verify(&message, &signature).is_ok();
             let status_valid = db_sig.status == SignatureStatus::Valid;
 
@@ -213,7 +223,7 @@ async fn verify_signature_locally(
                 .bind(contract_uuid)
                 .bind(db_sig.id)
                 .bind(&db_sig.signing_address)
-                .bind(&compute_transparency_hash(
+                .bind(compute_transparency_hash(
                     &TransparencyEntryType::SignatureVerified,
                     Some(contract_uuid),
                     Some(db_sig.id),
@@ -223,6 +233,7 @@ async fn verify_signature_locally(
                 .await;
             }
 
+            let status_clone = db_sig.status.clone();
             Ok(Json(VerifySignatureResponse {
                 valid,
                 signature_id: Some(db_sig.id),
@@ -232,7 +243,7 @@ async fn verify_signature_locally(
                 message: if valid {
                     "Signature is valid".to_string()
                 } else if !status_valid {
-                    format!("Signature status is: {}", db_sig.status)
+                    format!("Signature status is: {:?}", status_clone)
                 } else {
                     "Cryptographic verification failed".to_string()
                 },
@@ -303,16 +314,18 @@ pub async fn revoke_signature(
     let sig_uuid = Uuid::parse_str(&signature_id)
         .map_err(|_| ApiError::bad_request("InvalidSignatureId", "signature_id must be a UUID"))?;
 
-    let existing: Option<PackageSignature> = sqlx::query_as(
-        "SELECT * FROM package_signatures WHERE id = $1",
-    )
-    .bind(sig_uuid)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|err| db_internal_error("lookup signature", err))?;
+    let existing: Option<PackageSignature> =
+        sqlx::query_as("SELECT * FROM package_signatures WHERE id = $1")
+            .bind(sig_uuid)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|err| db_internal_error("lookup signature", err))?;
 
     let existing = existing.ok_or_else(|| {
-        ApiError::not_found("SignatureNotFound", format!("No signature with ID: {}", signature_id))
+        ApiError::not_found(
+            "SignatureNotFound",
+            format!("No signature with ID: {}", signature_id),
+        )
     })?;
 
     if existing.status != SignatureStatus::Valid {
@@ -514,7 +527,9 @@ pub async fn get_transparency_log(
     let count_query = format!("SELECT COUNT(*) FROM transparency_log {}", where_clause);
     let select_query = format!(
         "SELECT * FROM transparency_log {} ORDER BY timestamp DESC LIMIT ${} OFFSET ${}",
-        where_clause, param_count, param_count + 1
+        where_clause,
+        param_count,
+        param_count + 1
     );
 
     let mut count_sql = sqlx::query_scalar::<_, i64>(&count_query);
@@ -561,24 +576,26 @@ async fn parse_contract_uuid(state: &AppState, contract_id: &str) -> ApiResult<U
         return Ok(uuid);
     }
 
-    let uuid: Option<Uuid> = sqlx::query_scalar(
-        "SELECT id FROM contracts WHERE contract_id = $1 LIMIT 1",
-    )
-    .bind(contract_id)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|err| db_internal_error("lookup contract", err))?;
+    let uuid: Option<Uuid> =
+        sqlx::query_scalar("SELECT id FROM contracts WHERE contract_id = $1 LIMIT 1")
+            .bind(contract_id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|err| db_internal_error("lookup contract", err))?;
 
     uuid.ok_or_else(|| {
-        ApiError::not_found("ContractNotFound", format!("No contract found: {}", contract_id))
+        ApiError::not_found(
+            "ContractNotFound",
+            format!("No contract found: {}", contract_id),
+        )
     })
 }
 
-fn create_signing_message(hash: &str, contract_id: &str, version: &str) -> Vec<u8> {
+pub(crate) fn create_signing_message(hash: &str, contract_id: &str, version: &str) -> Vec<u8> {
     format!("{}:{}:{}", contract_id, version, hash).into_bytes()
 }
 
-fn compute_transparency_hash(
+pub(crate) fn compute_transparency_hash(
     entry_type: &TransparencyEntryType,
     contract_id: Option<Uuid>,
     signature_id: Option<Uuid>,

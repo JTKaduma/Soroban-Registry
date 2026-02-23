@@ -1,6 +1,5 @@
 /// Contract detection module
 /// Identifies createContract operations and extracts contract metadata
-
 use crate::rpc::{ContractDeployment, Operation};
 use tracing::{debug, error};
 

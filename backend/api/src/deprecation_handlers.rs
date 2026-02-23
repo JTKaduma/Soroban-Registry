@@ -1,4 +1,7 @@
-use axum::{extract::{Path, State}, Json};
+use axum::{
+    extract::{Path, State},
+    Json,
+};
 use chrono::{DateTime, Utc};
 use shared::{DeprecateContractRequest, DeprecationInfo, DeprecationStatus};
 use uuid::Uuid;
@@ -12,7 +15,16 @@ pub async fn get_deprecation_info(
 ) -> ApiResult<Json<DeprecationInfo>> {
     let (contract_uuid, contract_id) = fetch_contract_identity(&state, &id).await?;
 
-    let record = sqlx::query_as::<_, (DateTime<Utc>, DateTime<Utc>, Option<Uuid>, Option<String>, Option<String>)>(
+    let record = sqlx::query_as::<
+        _,
+        (
+            DateTime<Utc>,
+            DateTime<Utc>,
+            Option<Uuid>,
+            Option<String>,
+            Option<String>,
+        ),
+    >(
         "SELECT deprecated_at, retirement_at, replacement_contract_id, migration_guide_url, notes \
          FROM contract_deprecations WHERE contract_id = $1",
     )
@@ -42,9 +54,7 @@ pub async fn get_deprecation_info(
             Some(0)
         };
 
-        let replacement_contract_id = replacement_id
-            .map(|id| id.to_string())
-            .or_else(|| None);
+        let replacement_contract_id = replacement_id.map(|id| id.to_string());
 
         return Ok(Json(DeprecationInfo {
             contract_id,
@@ -129,7 +139,8 @@ async fn notify_dependents(
     contract_id: &str,
     retirement_at: DateTime<Utc>,
 ) -> ApiResult<()> {
-    let has_dep_contract_id = column_exists(state, "contract_dependencies", "dependency_contract_id").await?;
+    let has_dep_contract_id =
+        column_exists(state, "contract_dependencies", "dependency_contract_id").await?;
     let has_dep_name = column_exists(state, "contract_dependencies", "dependency_name").await?;
     let has_package_name = column_exists(state, "contract_dependencies", "package_name").await?;
 
@@ -142,7 +153,11 @@ async fn notify_dependents(
         .await
         .map_err(|err| db_internal_error("fetch dependents", err))?
     } else if has_dep_name || has_package_name {
-        let name_column = if has_dep_name { "dependency_name" } else { "package_name" };
+        let name_column = if has_dep_name {
+            "dependency_name"
+        } else {
+            "package_name"
+        };
         let sql = format!(
             "SELECT DISTINCT cd.contract_id \
              FROM contract_dependencies cd \
@@ -194,7 +209,12 @@ async fn fetch_contract_identity(state: &AppState, id: &str) -> ApiResult<(Uuid,
         .fetch_optional(&state.db)
         .await
         .map_err(|err| db_internal_error("fetch contract", err))?;
-        return row.ok_or_else(|| ApiError::not_found("ContractNotFound", format!("No contract found with ID: {}", id)));
+        return row.ok_or_else(|| {
+            ApiError::not_found(
+                "ContractNotFound",
+                format!("No contract found with ID: {}", id),
+            )
+        });
     }
 
     let row = sqlx::query_as::<_, (Uuid, String)>(
@@ -205,7 +225,12 @@ async fn fetch_contract_identity(state: &AppState, id: &str) -> ApiResult<(Uuid,
     .await
     .map_err(|err| db_internal_error("fetch contract", err))?;
 
-    row.ok_or_else(|| ApiError::not_found("ContractNotFound", format!("No contract found with ID: {}", id)))
+    row.ok_or_else(|| {
+        ApiError::not_found(
+            "ContractNotFound",
+            format!("No contract found with ID: {}", id),
+        )
+    })
 }
 
 async fn fetch_contract_uuid(state: &AppState, contract_id: &str) -> ApiResult<Uuid> {
@@ -213,14 +238,17 @@ async fn fetch_contract_uuid(state: &AppState, contract_id: &str) -> ApiResult<U
         return Ok(uuid);
     }
 
-    let uuid = sqlx::query_scalar::<_, Uuid>(
-        "SELECT id FROM contracts WHERE contract_id = $1",
-    )
-    .bind(contract_id)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|err| db_internal_error("fetch contract", err))?
-    .ok_or_else(|| ApiError::not_found("ContractNotFound", format!("Contract '{}' not found", contract_id)))?;
+    let uuid = sqlx::query_scalar::<_, Uuid>("SELECT id FROM contracts WHERE contract_id = $1")
+        .bind(contract_id)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|err| db_internal_error("fetch contract", err))?
+        .ok_or_else(|| {
+            ApiError::not_found(
+                "ContractNotFound",
+                format!("Contract '{}' not found", contract_id),
+            )
+        })?;
 
     Ok(uuid)
 }

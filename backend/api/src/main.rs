@@ -1,30 +1,31 @@
 #![allow(dead_code, unused)]
 
-mod routes;
-mod handlers;
-mod error;
-mod state;
-mod rate_limit;
 mod aggregation;
+mod error;
+mod handlers;
+mod rate_limit;
+mod routes;
+mod state;
 mod validation;
 // mod auth;
 // mod auth_handlers;
 mod cache;
-mod metrics_handler;
 mod metrics;
+mod metrics_handler;
 // mod resource_handlers;
 // mod resource_tracking;
 mod dependency;
 mod analytics;
-mod custom_metrics_handlers;
 mod breaking_changes;
+mod custom_metrics_handlers;
 mod deprecation_handlers;
-mod type_safety;
 pub mod health_monitor;
+pub mod signing_handlers;
+mod type_safety;
 
 use anyhow::Result;
-use axum::{middleware, Router};
 use axum::http::{header, HeaderValue, Method};
+use axum::{middleware, Router};
 use dotenv::dotenv;
 use prometheus::Registry;
 use sqlx::postgres::PgPoolOptions;
@@ -74,7 +75,7 @@ async fn main() -> Result<()> {
     if let Err(e) = crate::metrics::register_all(&registry) {
         tracing::error!("Failed to register metrics: {}", e);
     }
-    
+
     // Create app state
     let is_shutting_down = Arc::new(AtomicBool::new(false));
     let state = AppState::new(pool.clone(), registry, is_shutting_down.clone());
@@ -138,7 +139,9 @@ async fn main() -> Result<()> {
             _ = terminate => {},
         }
 
-        tracing::info!("SIGTERM/SIGINT received. Failing health checks and stopping new requests...");
+        tracing::info!(
+            "SIGTERM/SIGINT received. Failing health checks and stopping new requests..."
+        );
         is_shutting_down.store(true, std::sync::atomic::Ordering::SeqCst);
         let _ = tx.send(());
     });

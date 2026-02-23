@@ -10,14 +10,14 @@
 //! - Return type validation
 //! - Generate TypeScript/Rust bindings
 
-pub mod types;
-pub mod parser;
-pub mod validator;
 pub mod bindings;
 pub mod openapi;
+pub mod parser;
+pub mod types;
+pub mod validator;
 
-pub use types::*;
-pub use parser::*;
-pub use validator::*;
 pub use bindings::*;
 pub use openapi::*;
+pub use parser::*;
+pub use types::*;
+pub use validator::*;

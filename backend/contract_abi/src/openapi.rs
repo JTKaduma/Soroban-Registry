@@ -121,13 +121,22 @@ pub fn generate_openapi(abi: &ContractABI, base_path: Option<&str>) -> OpenApiDo
     for func in abi.public_functions() {
         let path = format!("{}/{}", base.trim_end_matches('/'), func.name);
         let op = operation_from_function(func, abi, &mut schema_gen);
-        paths.insert(path, PathItem { post: Some(op), get: None });
+        paths.insert(
+            path,
+            PathItem {
+                post: Some(op),
+                get: None,
+            },
+        );
     }
 
     let components = schema_gen.into_components();
     let info = OpenApiInfo {
         title: abi.name.clone(),
-        description: abi.version.as_ref().map(|v| format!("Contract ABI (version {})", v)),
+        description: abi
+            .version
+            .as_ref()
+            .map(|v| format!("Contract ABI (version {})", v)),
         version: abi.version.clone().unwrap_or_else(|| "0.0.0".to_string()),
     };
 
@@ -135,7 +144,7 @@ pub fn generate_openapi(abi: &ContractABI, base_path: Option<&str>) -> OpenApiDo
         openapi: "3.0.0".to_string(),
         info,
         paths,
-        components: if components.schemas.as_ref().map_or(true, |s| s.is_empty()) {
+        components: if components.schemas.as_ref().is_none_or(|s| s.is_empty()) {
             None
         } else {
             Some(components)
@@ -164,7 +173,7 @@ fn operation_from_function(
                 examples: None,
             },
         )]);
-        let example = example;
+        
         (
             Some(RequestBody {
                 required: true,
@@ -175,7 +184,8 @@ fn operation_from_function(
     };
 
     let mut responses = BTreeMap::new();
-    let (response_schema, response_example) = schema_gen.type_to_schema_and_example(&func.return_type);
+    let (response_schema, response_example) =
+        schema_gen.type_to_schema_and_example(&func.return_type);
     responses.insert(
         "200".to_string(),
         Response {
@@ -196,7 +206,14 @@ fn operation_from_function(
         let err_desc: String = abi
             .errors
             .iter()
-            .map(|e| format!("{} (code {}): {}", e.name, e.code, e.doc.as_deref().unwrap_or("")))
+            .map(|e| {
+                format!(
+                    "{} (code {}): {}",
+                    e.name,
+                    e.code,
+                    e.doc.as_deref().unwrap_or("")
+                )
+            })
             .collect::<Vec<_>>()
             .join("; ");
         responses.insert(
@@ -232,7 +249,10 @@ impl SchemaGenerator {
         }
     }
 
-    fn params_schema_and_example(&mut self, params: &[FunctionParam]) -> (SchemaRef, Option<serde_json::Value>) {
+    fn params_schema_and_example(
+        &mut self,
+        params: &[FunctionParam],
+    ) -> (SchemaRef, Option<serde_json::Value>) {
         let mut properties = BTreeMap::new();
         let mut required = Vec::new();
         let mut example = serde_json::Map::new();
@@ -264,7 +284,10 @@ impl SchemaGenerator {
         (SchemaRef::Inline(Box::new(schema)), ex)
     }
 
-    fn type_to_schema_and_example(&mut self, t: &SorobanType) -> (SchemaRef, Option<serde_json::Value>) {
+    fn type_to_schema_and_example(
+        &mut self,
+        t: &SorobanType,
+    ) -> (SchemaRef, Option<serde_json::Value>) {
         match t {
             SorobanType::Bool => (
                 SchemaRef::Inline(Box::new(Schema {
@@ -438,7 +461,10 @@ impl SchemaGenerator {
                     arr_ex,
                 )
             }
-            SorobanType::Map { key_type: _, value_type } => {
+            SorobanType::Map {
+                key_type: _,
+                value_type,
+            } => {
                 let (val_schema, _) = self.type_to_schema_and_example(value_type);
                 (
                     SchemaRef::Inline(Box::new(Schema {
@@ -491,19 +517,19 @@ impl SchemaGenerator {
                     );
                 }
                 let ref_path = format!("#/components/schemas/{}", schema_name);
-                let ex = self.schemas.get(&schema_name).and_then(|s| s.example.clone());
-                (
-                    SchemaRef::Ref {
-                        r#ref: ref_path,
-                    },
-                    ex,
-                )
+                let ex = self
+                    .schemas
+                    .get(&schema_name)
+                    .and_then(|s| s.example.clone());
+                (SchemaRef::Ref { r#ref: ref_path }, ex)
             }
             SorobanType::Enum { name, variants } => {
                 let schema_name = sanitize_schema_name(name);
                 if !self.schemas.contains_key(&schema_name) {
-                    let enum_vals: Vec<serde_json::Value> =
-                        variants.iter().map(|v| serde_json::Value::String(v.name.clone())).collect();
+                    let enum_vals: Vec<serde_json::Value> = variants
+                        .iter()
+                        .map(|v| serde_json::Value::String(v.name.clone()))
+                        .collect();
                     let ex = enum_vals.first().cloned();
                     self.schemas.insert(
                         schema_name.clone(),
@@ -513,7 +539,7 @@ impl SchemaGenerator {
                             description: Some(
                                 variants
                                     .iter()
-                                    .map(|v| format!("{}", v.name))
+                                    .map(|v| v.name.to_string())
                                     .collect::<Vec<_>>()
                                     .join(", "),
                             ),
@@ -528,13 +554,11 @@ impl SchemaGenerator {
                     );
                 }
                 let ref_path = format!("#/components/schemas/{}", schema_name);
-                let ex = self.schemas.get(&schema_name).and_then(|s| s.example.clone());
-                (
-                    SchemaRef::Ref {
-                        r#ref: ref_path,
-                    },
-                    ex,
-                )
+                let ex = self
+                    .schemas
+                    .get(&schema_name)
+                    .and_then(|s| s.example.clone());
+                (SchemaRef::Ref { r#ref: ref_path }, ex)
             }
             SorobanType::Tuple { elements } => {
                 let (item_schemas, item_examples): (Vec<_>, Vec<_>) = elements
@@ -573,7 +597,10 @@ impl SchemaGenerator {
                 };
                 (SchemaRef::Inline(Box::new(schema)), arr_ex)
             }
-            SorobanType::Result { ok_type, err_type: _ } => self.type_to_schema_and_example(ok_type),
+            SorobanType::Result {
+                ok_type,
+                err_type: _,
+            } => self.type_to_schema_and_example(ok_type),
             SorobanType::Custom { name } => {
                 let st = SorobanType::from_type_string(name);
                 if !matches!(st, SorobanType::Custom { name: ref n } if n == name) {
@@ -612,7 +639,13 @@ impl SchemaGenerator {
 fn sanitize_schema_name(name: &str) -> String {
     let s: String = name
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     if s.is_empty() {
         "Unnamed".to_string()

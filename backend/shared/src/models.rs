@@ -101,6 +101,15 @@ pub struct ContractVersion {
     pub created_at: DateTime<Utc>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state_schema: Option<serde_json::Value>,
+    /// Optional Ed25519 signature over "{contract_id}:{version}:{wasm_hash}"
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature: Option<String>,
+    /// Publisher's public key corresponding to the signature (base64-encoded ed25519 key)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub publisher_key: Option<String>,
+    /// Signature algorithm identifier (e.g. "ed25519")
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature_algorithm: Option<String>,
 }
 
 /// Verification status and details
@@ -210,6 +219,13 @@ pub struct CreateContractVersionRequest {
     pub source_url: Option<String>,
     pub commit_hash: Option<String>,
     pub release_notes: Option<String>,
+    /// Optional Ed25519 signature and publisher key metadata for this version
+    #[serde(default)]
+    pub signature: Option<String>,
+    #[serde(default)]
+    pub publisher_key: Option<String>,
+    #[serde(default)]
+    pub signature_algorithm: Option<String>,
 }
 
 // ────────────────────────────────────────────────────────────────────────────

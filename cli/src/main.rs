@@ -397,6 +397,28 @@ pub enum Commands {
         signature: Option<String>,
     },
 
+    /// Verify a contract binary against an Ed25519 signature locally
+    VerifyContract {
+        /// Path to the contract WASM/binary file
+        wasm_path: String,
+
+        /// Contract ID used when signing
+        #[arg(long)]
+        contract_id: String,
+
+        /// Contract version used when signing
+        #[arg(long)]
+        version: String,
+
+        /// Ed25519 signature (base64)
+        #[arg(long)]
+        signature: String,
+
+        /// Ed25519 public key (base64)
+        #[arg(long)]
+        public_key: String,
+    },
+
     /// Manage signing keys and signatures
     Keys {
         #[command(subcommand)]
@@ -1282,6 +1304,27 @@ async fn main() -> Result<()> {
                 signature.as_deref(),
             )
             .await?;
+        }
+        Commands::VerifyContract {
+            wasm_path,
+            contract_id,
+            version,
+            signature,
+            public_key,
+        } => {
+            log::debug!(
+                "Command: verify-contract | wasm_path={} contract_id={} version={}",
+                wasm_path,
+                contract_id,
+                version
+            );
+            package_signing::verify_contract_local(
+                &wasm_path,
+                &contract_id,
+                &version,
+                &signature,
+                &public_key,
+            )?;
         }
         Commands::Keys { action } => match action {
             KeysCommands::Generate {} => {

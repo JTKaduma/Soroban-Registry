@@ -1,12 +1,11 @@
+use crate::rpc::ContractDeployment;
 /// Database writer module
 /// Handles writing detected contracts to the database
-
 use shared::{Contract, Network};
 use sqlx::{PgPool, Row};
 use thiserror::Error;
-use uuid::Uuid;
 use tracing::{debug, error, info};
-use crate::rpc::ContractDeployment;
+use uuid::Uuid;
 
 #[derive(Error, Debug)]
 pub enum DatabaseError {
@@ -67,15 +66,14 @@ impl DatabaseWriter {
         }
 
         // Create a publisher record for the deployer if it doesn't exist
-        let publisher_id = self
-            .get_or_create_publisher(&deployment.deployer)
-            .await?;
+        let publisher_id = self.get_or_create_publisher(&deployment.deployer).await?;
 
         // Insert new contract with is_verified = false
         let contract_id = Uuid::new_v4();
         let now = chrono::Utc::now();
 
-        sqlx::query(r#"
+        sqlx::query(
+            r#"
             INSERT INTO contracts (
                 id,
                 contract_id,
@@ -87,25 +85,26 @@ impl DatabaseWriter {
                 created_at,
                 updated_at
             ) VALUES ($1, $2, $3, $4, $5, $6::network_type, $7, $8, $9)
-        "#)
-            .bind(contract_id)
-            .bind(&deployment.contract_id)
-            .bind(format!("{}_{}", deployment.contract_id, deployment.op_id))
-            .bind(&deployment.contract_id)
-            .bind(publisher_id)
-            .bind(network_str)
-            .bind(false)
-            .bind(now)
-            .bind(now)
-            .execute(&self.pool)
-            .await
-            .map_err(|e| {
-                error!(
-                    "Failed to insert contract record: {} ({})",
-                    deployment.contract_id, e
-                );
-                DatabaseError::SqlError(e.to_string())
-            })?;
+        "#,
+        )
+        .bind(contract_id)
+        .bind(&deployment.contract_id)
+        .bind(format!("{}_{}", deployment.contract_id, deployment.op_id))
+        .bind(&deployment.contract_id)
+        .bind(publisher_id)
+        .bind(network_str)
+        .bind(false)
+        .bind(now)
+        .bind(now)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| {
+            error!(
+                "Failed to insert contract record: {} ({})",
+                deployment.contract_id, e
+            );
+            DatabaseError::SqlError(e.to_string())
+        })?;
 
         info!(
             "Contract record created: contract_id={}, network={}, publisher={}",
@@ -129,7 +128,10 @@ impl DatabaseWriter {
                 Ok(true) => new_count += 1,
                 Ok(false) => duplicate_count += 1,
                 Err(e) => {
-                    error!("Failed to write contract: {}, error: {}", deployment.contract_id, e);
+                    error!(
+                        "Failed to write contract: {}, error: {}",
+                        deployment.contract_id, e
+                    );
                     // Continue with next contract, don't fail the entire batch
                 }
             }
@@ -219,7 +221,7 @@ impl DatabaseWriter {
             WHERE network = $1::network_type AND is_verified = false
             ORDER BY created_at DESC
             LIMIT $2
-            "#
+            "#,
         )
         .bind(network_str)
         .bind(limit)

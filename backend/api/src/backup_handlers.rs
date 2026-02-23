@@ -12,8 +12,8 @@ use uuid::Uuid;
 
 use crate::{
     disaster_recovery_models::{
-        CreateDisasterRecoveryPlanRequest, DisasterRecoveryPlan, ExecuteRecoveryRequest, 
-        RecoveryMetrics, RecoveryNotification
+        CreateDisasterRecoveryPlanRequest, DisasterRecoveryPlan, ExecuteRecoveryRequest,
+        RecoveryMetrics, RecoveryNotification,
     },
     error::{ApiError, ApiResult},
     state::AppState,
@@ -32,7 +32,7 @@ pub async fn create_backup(
         .ok_or_else(|| ApiError::not_found("contract", "Contract not found"))?;
 
     let backup_date = Utc::now().date_naive();
-    
+
     let metadata = serde_json::json!({
         "name": contract.name,
         "description": contract.description,
@@ -227,7 +227,9 @@ pub async fn get_disaster_recovery_plan(
     .fetch_optional(&state.db)
     .await
     .map_err(|e| ApiError::internal(format!("Database error: {}", e)))?
-    .ok_or_else(|| ApiError::not_found("disaster_recovery_plan", "Disaster recovery plan not found"))?;
+    .ok_or_else(|| {
+        ApiError::not_found("disaster_recovery_plan", "Disaster recovery plan not found")
+    })?;
 
     Ok(Json(drp))
 }
@@ -238,7 +240,7 @@ pub async fn execute_recovery(
     Json(req): Json<ExecuteRecoveryRequest>,
 ) -> ApiResult<Json<RecoveryMetrics>> {
     let start_time = std::time::Instant::now();
-    
+
     // Find the most recent backup based on RPO requirements
     let backup_date = if let Some(target) = req.recovery_target {
         if target == "latest" {
@@ -251,24 +253,24 @@ pub async fn execute_recovery(
             .await
             .map_err(|e| ApiError::internal(format!("Database error: {}", e)))?;
             row.map(|r| r.0)
-            .ok_or_else(|| ApiError::not_found("backup", "No backups found for contract"))?        
+                .ok_or_else(|| ApiError::not_found("backup", "No backups found for contract"))?
         } else {
             NaiveDate::parse_from_str(&target, "%Y-%m-%d")
-                .map_err(|_| ApiError::bad_request("invalid_date", "Invalid date format"))?    
+                .map_err(|_| ApiError::bad_request("invalid_date", "Invalid date format"))?
         }
     } else {
         // Get the latest backup within RPO window
         let row: Option<(i32,)> = sqlx::query_as(
-            "SELECT rpo_minutes FROM disaster_recovery_plans WHERE contract_id = $1"
+            "SELECT rpo_minutes FROM disaster_recovery_plans WHERE contract_id = $1",
         )
         .bind(contract_id)
         .fetch_optional(&state.db)
         .await
         .map_err(|e| ApiError::internal(format!("Database error: {}", e)))?;
         let rpo_minutes = row.map(|r| r.0).unwrap_or(5); // Default to 5 minutes if no DRP exists
-        
+
         let cutoff_date = (Utc::now() - chrono::Duration::minutes(rpo_minutes as i64)).date_naive();
-        
+
         let row: Option<(chrono::NaiveDate,)> = sqlx::query_as(
             "SELECT backup_date FROM contract_backups WHERE contract_id = $1 AND backup_date >= $2 ORDER BY backup_date DESC LIMIT 1"
         )
@@ -277,20 +279,22 @@ pub async fn execute_recovery(
         .fetch_optional(&state.db)
         .await
         .map_err(|e| ApiError::internal(format!("Database error: {}", e)))?;
-        row.map(|r| r.0)
-        .ok_or_else(|| ApiError::not_found("backup", "No recent backup found within RPO window"))?        
+        row.map(|r| r.0).ok_or_else(|| {
+            ApiError::not_found("backup", "No recent backup found within RPO window")
+        })?
     };
-    
+
     // Perform the restoration
     let restore_req = RestoreBackupRequest {
         backup_date: backup_date.to_string(),
     };
-    
-    let restoration = restore_backup_from_date(State(state.clone()), Path((contract_id, restore_req))).await?;
-    
+
+    let restoration =
+        restore_backup_from_date(State(state.clone()), Path((contract_id, restore_req))).await?;
+
     let duration_seconds = start_time.elapsed().as_secs() as i32;
     let data_loss_seconds = (chrono::Duration::minutes(1)).num_seconds() as i32; // Default to 1 minute
-    
+
     let metrics = RecoveryMetrics {
         rto_achieved_seconds: duration_seconds,
         rpo_ached_seconds: data_loss_seconds,
@@ -298,7 +302,7 @@ pub async fn execute_recovery(
         recovery_duration_seconds: duration_seconds,
         data_loss_seconds,
     };
-    
+
     Ok(Json(metrics))
 }
 

@@ -45,7 +45,7 @@ function PublisherProfileContent() {
         </div>
         <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Publisher Not Found</h2>
         <p className="text-gray-500 dark:text-gray-400 max-w-md mx-auto">
-          We couldn't find a publisher with address <span className="font-mono bg-gray-100 dark:bg-gray-800 px-1 py-0.5 rounded">{address}</span>.
+          We couldn&apos;t find a publisher with address <span className="font-mono bg-gray-100 dark:bg-gray-800 px-1 py-0.5 rounded">{address}</span>.
         </p>
       </div>
     );
@@ -54,14 +54,14 @@ function PublisherProfileContent() {
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8 animate-in fade-in duration-500">
       <PublisherHeader publisher={publisher} />
-      
+
       <PublisherStats publisher={publisher} />
-      
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2">
           <PublisherContractsList contracts={publisher.contracts} />
         </div>
-        
+
         <div className="lg:col-span-1">
           <PublisherActivityTimeline activity={publisher.activity} />
         </div>

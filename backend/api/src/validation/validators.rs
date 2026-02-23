@@ -9,23 +9,23 @@ use regex::Regex;
 lazy_static! {
     /// Stellar contract ID pattern: 56 characters starting with 'C'
     static ref CONTRACT_ID_REGEX: Regex = Regex::new(r"^C[A-Z0-9]{55}$").unwrap();
-    
+
     /// Stellar address pattern: 56 characters starting with 'G'
     static ref STELLAR_ADDRESS_REGEX: Regex = Regex::new(r"^G[A-Z0-9]{55}$").unwrap();
-    
+
     /// Semver pattern: major.minor.patch with optional pre-release
     static ref SEMVER_REGEX: Regex = Regex::new(
         r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$"
     ).unwrap();
-    
+
     /// URL pattern for source URLs
     static ref URL_REGEX: Regex = Regex::new(
         r"^https?://[^\s/$.?#].[^\s]*$"
     ).unwrap();
-    
+
     /// HTML tag detection pattern
     static ref HTML_TAG_REGEX: Regex = Regex::new(r"<[^>]+>").unwrap();
-    
+
     /// Script/event handler pattern for XSS detection
     static ref XSS_PATTERN_REGEX: Regex = Regex::new(
         r"(?i)(javascript:|on\w+\s*=|<script|<iframe|<object|<embed)"
@@ -61,7 +61,10 @@ pub fn validate_length_with_field(
 ) -> Result<(), String> {
     let len = value.chars().count();
     if len < min {
-        return Err(format!("{} must be at least {} characters", field_name, min));
+        return Err(format!(
+            "{} must be at least {} characters",
+            field_name, min
+        ));
     }
     if len > max {
         return Err(format!("{} must be at most {} characters", field_name, max));
@@ -73,17 +76,17 @@ pub fn validate_length_with_field(
 /// Must be 56 characters starting with 'C'
 pub fn validate_contract_id(contract_id: &str) -> Result<(), String> {
     let trimmed = contract_id.trim();
-    
+
     if trimmed.is_empty() {
         return Err("contract_id is required".to_string());
     }
-    
+
     if !CONTRACT_ID_REGEX.is_match(trimmed) {
         return Err(
-            "must be a valid Stellar contract ID (56 characters starting with 'C')".to_string()
+            "must be a valid Stellar contract ID (56 characters starting with 'C')".to_string(),
         );
     }
-    
+
     Ok(())
 }
 
@@ -91,17 +94,17 @@ pub fn validate_contract_id(contract_id: &str) -> Result<(), String> {
 /// Must be 56 characters starting with 'G'
 pub fn validate_stellar_address(address: &str) -> Result<(), String> {
     let trimmed = address.trim();
-    
+
     if trimmed.is_empty() {
         return Err("stellar address is required".to_string());
     }
-    
+
     if !STELLAR_ADDRESS_REGEX.is_match(trimmed) {
         return Err(
-            "must be a valid Stellar address (56 characters starting with 'G')".to_string()
+            "must be a valid Stellar address (56 characters starting with 'G')".to_string(),
         );
     }
-    
+
     Ok(())
 }
 
@@ -116,30 +119,30 @@ pub fn validate_stellar_address_optional(address: &Option<String>) -> Result<(),
 /// Validate semver version string
 pub fn validate_semver(version: &str) -> Result<(), String> {
     let trimmed = version.trim();
-    
+
     if trimmed.is_empty() {
         return Err("version is required".to_string());
     }
-    
+
     if !SEMVER_REGEX.is_match(trimmed) {
         return Err("must be a valid semantic version (e.g., 1.0.0)".to_string());
     }
-    
+
     Ok(())
 }
 
 /// Validate URL format
 pub fn validate_url(url: &str) -> Result<(), String> {
     let trimmed = url.trim();
-    
+
     if trimmed.is_empty() {
         return Ok(()); // Empty URLs are allowed (optional field)
     }
-    
+
     if !URL_REGEX.is_match(trimmed) {
         return Err("must be a valid URL (starting with http:// or https://)".to_string());
     }
-    
+
     Ok(())
 }
 
@@ -168,11 +171,15 @@ pub fn validate_no_xss(value: &str) -> Result<(), String> {
 }
 
 /// Validate a list of tags
-pub fn validate_tags(tags: &[String], max_tags: usize, max_tag_length: usize) -> Result<(), String> {
+pub fn validate_tags(
+    tags: &[String],
+    max_tags: usize,
+    max_tag_length: usize,
+) -> Result<(), String> {
     if tags.len() > max_tags {
         return Err(format!("at most {} tags are allowed", max_tags));
     }
-    
+
     for (i, tag) in tags.iter().enumerate() {
         let trimmed = tag.trim();
         if trimmed.is_empty() {
@@ -188,7 +195,7 @@ pub fn validate_tags(tags: &[String], max_tags: usize, max_tag_length: usize) ->
             return Err(format!("tag '{}': {}", trimmed, e));
         }
     }
-    
+
     Ok(())
 }
 
@@ -227,7 +234,7 @@ pub fn validate_json_depth(value: &serde_json::Value, max_depth: usize) -> Resul
         }
         Ok(())
     }
-    
+
     check_depth(value, 0, max_depth)
 }
 
@@ -267,14 +274,14 @@ mod tests {
         // Valid contract ID
         let valid_id = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
         assert!(validate_contract_id(valid_id).is_ok());
-        
+
         // Invalid: starts with G
         let invalid_g = "GDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
         assert!(validate_contract_id(invalid_g).is_err());
-        
+
         // Invalid: too short
         assert!(validate_contract_id("CABC123").is_err());
-        
+
         // Invalid: empty
         assert!(validate_contract_id("").is_err());
     }
@@ -284,7 +291,7 @@ mod tests {
         // Valid address
         let valid = "GDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
         assert!(validate_stellar_address(valid).is_ok());
-        
+
         // Invalid: starts with C
         let invalid_c = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
         assert!(validate_stellar_address(invalid_c).is_err());
@@ -315,7 +322,7 @@ mod tests {
     fn test_validate_tags() {
         let valid_tags = vec!["defi".to_string(), "token".to_string()];
         assert!(validate_tags(&valid_tags, 10, 50).is_ok());
-        
+
         // Too many tags
         let many_tags: Vec<String> = (0..15).map(|i| format!("tag{}", i)).collect();
         assert!(validate_tags(&many_tags, 10, 50).is_err());

@@ -54,7 +54,10 @@ pub trait Rule: Send + Sync {
 fn run_validation_rules(old: &Schema, new: &Schema) -> Vec<Finding> {
     let mut findings = Vec::new();
     // Built-in rules - engine is extensible: add new boxed rules here.
-    let rules: Vec<Box<dyn Rule>> = vec![Box::new(NoFieldRemovalRule {}), Box::new(TypeCompatibilityRule {})];
+    let rules: Vec<Box<dyn Rule>> = vec![
+        Box::new(NoFieldRemovalRule {}),
+        Box::new(TypeCompatibilityRule {}),
+    ];
 
     for r in rules {
         let mut res = r.evaluate(old, new);
@@ -62,7 +65,8 @@ fn run_validation_rules(old: &Schema, new: &Schema) -> Vec<Finding> {
     }
 
     // Include additions as Info
-    let old_names: std::collections::HashSet<_> = old.fields.iter().map(|f| f.name.as_str()).collect();
+    let old_names: std::collections::HashSet<_> =
+        old.fields.iter().map(|f| f.name.as_str()).collect();
     for f in &new.fields {
         if !old_names.contains(f.name.as_str()) {
             findings.push(Finding {
@@ -89,7 +93,8 @@ impl Rule for NoFieldRemovalRule {
 
     fn evaluate(&self, old: &Schema, new: &Schema) -> Vec<Finding> {
         let mut findings = Vec::new();
-        let new_names: std::collections::HashSet<_> = new.fields.iter().map(|f| f.name.as_str()).collect();
+        let new_names: std::collections::HashSet<_> =
+            new.fields.iter().map(|f| f.name.as_str()).collect();
         for f in &old.fields {
             if !new_names.contains(f.name.as_str()) {
                 findings.push(Finding {
@@ -116,7 +121,11 @@ impl Rule for TypeCompatibilityRule {
 
     fn evaluate(&self, old: &Schema, new: &Schema) -> Vec<Finding> {
         let mut findings = Vec::new();
-        let new_map: std::collections::HashMap<_, _> = new.fields.iter().map(|f| (f.name.as_str(), &f.type_name)).collect();
+        let new_map: std::collections::HashMap<_, _> = new
+            .fields
+            .iter()
+            .map(|f| (f.name.as_str(), &f.type_name))
+            .collect();
         for f in &old.fields {
             if let Some(n_ty) = new_map.get(f.name.as_str()) {
                 if n_ty.as_str() != f.type_name.as_str() {
@@ -124,7 +133,10 @@ impl Rule for TypeCompatibilityRule {
                     findings.push(Finding {
                         field: Some(f.name.clone()),
                         severity: Severity::Warning,
-                        message: format!("Field '{}' changed type from '{}' to '{}'", f.name, f.type_name, n_ty),
+                        message: format!(
+                            "Field '{}' changed type from '{}' to '{}'",
+                            f.name, f.type_name, n_ty
+                        ),
                     });
                 }
             }
@@ -132,4 +144,3 @@ impl Rule for TypeCompatibilityRule {
         findings
     }
 }
-

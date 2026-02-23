@@ -4,11 +4,11 @@
 #[cfg(test)]
 mod tests {
     use indexer::backoff::ExponentialBackoff;
-    use indexer::detector::{detect_contract_deployments};
-    use indexer::rpc::{Operation, ContractDeployment};
+    use indexer::detector::detect_contract_deployments;
+    use indexer::rpc::{ContractDeployment, Operation};
     use indexer::state::IndexerState;
-    use shared::Network;
     use serde_json::json;
+    use shared::Network;
 
     #[test]
     fn test_exponential_backoff_sequence() {

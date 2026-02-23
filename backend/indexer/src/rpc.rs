@@ -1,6 +1,5 @@
 /// RPC client for polling Stellar network ledgers
 /// Handles HTTP requests to Stellar RPC endpoints and deserializes ledger/operation data
-
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use thiserror::Error;
@@ -11,7 +10,7 @@ pub enum RpcError {
     #[error("HTTP request failed: {0}")]
     RequestFailed(String),
     #[error("RPC returned error: {0}")]
-    RpcError(String),
+    Rpc(String),
     #[error("Invalid response format: {0}")]
     InvalidResponse(String),
     #[error("Network timeout")]
@@ -124,7 +123,7 @@ impl StellarRpcClient {
             })?;
 
         if !response.status().is_success() {
-            return Err(RpcError::RpcError(format!(
+            return Err(RpcError::Rpc(format!(
                 "HTTP {}: {}",
                 response.status(),
                 response.text().await.unwrap_or_default()
@@ -167,7 +166,7 @@ impl StellarRpcClient {
             })?;
 
         if !response.status().is_success() {
-            return Err(RpcError::RpcError(format!(
+            return Err(RpcError::Rpc(format!(
                 "HTTP {}: {}",
                 response.status(),
                 response.text().await.unwrap_or_default()
@@ -211,7 +210,7 @@ impl StellarRpcClient {
             })?;
 
         if !response.status().is_success() {
-            return Err(RpcError::RpcError(format!(
+            return Err(RpcError::Rpc(format!(
                 "HTTP {}: {}",
                 response.status(),
                 response.text().await.unwrap_or_default()
@@ -219,15 +218,15 @@ impl StellarRpcClient {
         }
 
         // Parse the response - it returns an array
-        let response_text = response.text().await.map_err(|e| {
-            RpcError::InvalidResponse(format!("Failed to read response: {}", e))
-        })?;
+        let response_text = response
+            .text()
+            .await
+            .map_err(|e| RpcError::InvalidResponse(format!("Failed to read response: {}", e)))?;
 
-        let data: serde_json::Value = serde_json::from_str(&response_text)
-            .map_err(|e| {
-                error!("Invalid JSON in ledger response: {}", e);
-                RpcError::InvalidResponse(format!("Invalid JSON: {}", e))
-            })?;
+        let data: serde_json::Value = serde_json::from_str(&response_text).map_err(|e| {
+            error!("Invalid JSON in ledger response: {}", e);
+            RpcError::InvalidResponse(format!("Invalid JSON: {}", e))
+        })?;
 
         // Extract first ledger from _embedded records
         let ledgers = data
@@ -311,7 +310,7 @@ impl StellarRpcClient {
         if response.status().is_success() {
             Ok(())
         } else {
-            Err(RpcError::RpcError(format!(
+            Err(RpcError::Rpc(format!(
                 "Health check failed with status {}",
                 response.status()
             )))

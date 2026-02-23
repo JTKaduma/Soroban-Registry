@@ -1,11 +1,10 @@
 use once_cell::sync::Lazy;
 use prometheus::{
-    opts, Encoder, GaugeVec, HistogramOpts, HistogramVec, IntCounter, IntCounterVec,
-    IntGauge, IntGaugeVec, Registry, TextEncoder,
+    opts, Encoder, GaugeVec, HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGauge,
+    IntGaugeVec, Registry, TextEncoder,
 };
 
 pub static REGISTRY: Lazy<Registry> = Lazy::new(Registry::new);
-
 
 macro_rules! counter_vec {
     ($name:expr, $help:expr, $labels:expr) => {

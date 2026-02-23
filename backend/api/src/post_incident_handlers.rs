@@ -8,7 +8,8 @@ use uuid::Uuid;
 
 use crate::{
     disaster_recovery_models::{
-        ActionItem, CreateActionItemRequest, CreatePostIncidentReportRequest, PostIncidentReport, PostIncidentReportRow
+        ActionItem, CreateActionItemRequest, CreatePostIncidentReportRequest, PostIncidentReport,
+        PostIncidentReportRow,
     },
     error::{ApiError, ApiResult},
     state::AppState,
@@ -134,14 +135,12 @@ pub async fn update_action_item_status(
         ));
     }
 
-    sqlx::query(
-        "UPDATE action_items SET status = $1, updated_at = NOW() WHERE id = $2",
-    )
-    .bind(&status)
-    .bind(action_item_id)
-    .execute(&state.db)
-    .await
-    .map_err(|e| ApiError::internal(format!("Failed to update action item: {}", e)))?;
+    sqlx::query("UPDATE action_items SET status = $1, updated_at = NOW() WHERE id = $2")
+        .bind(&status)
+        .bind(action_item_id)
+        .execute(&state.db)
+        .await
+        .map_err(|e| ApiError::internal(format!("Failed to update action item: {}", e)))?;
 
     Ok(StatusCode::NO_CONTENT)
 }

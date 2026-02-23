@@ -4,7 +4,7 @@ interface CacheItem<T> {
 }
 
 export class InMemoryCache {
-  private cache: Map<string, CacheItem<any>>;
+  private cache: Map<string, CacheItem<unknown>>;
 
   constructor() {
     this.cache = new Map();
@@ -26,7 +26,7 @@ export class InMemoryCache {
       return null;
     }
 
-    return item.value;
+    return item.value as T;
   }
 
   clear(): void {

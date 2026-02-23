@@ -8,8 +8,8 @@ use uuid::Uuid;
 
 use crate::{
     disaster_recovery_models::{
-        CreateNotificationTemplateRequest, CreateUserNotificationPreferenceRequest, 
-        NotificationTemplate, SendNotificationRequest, UserNotificationPreference
+        CreateNotificationTemplateRequest, CreateUserNotificationPreferenceRequest,
+        NotificationTemplate, SendNotificationRequest, UserNotificationPreference,
     },
     error::{ApiError, ApiResult},
     state::AppState,
@@ -49,7 +49,9 @@ pub async fn get_notification_template(
     .fetch_optional(&state.db)
     .await
     .map_err(|e| ApiError::internal(format!("Database error: {}", e)))?
-    .ok_or_else(|| ApiError::not_found("notification_template", "Notification template not found"))?;
+    .ok_or_else(|| {
+        ApiError::not_found("notification_template", "Notification template not found")
+    })?;
 
     Ok(Json(template))
 }
@@ -105,21 +107,26 @@ pub async fn send_notification(
     .fetch_optional(&state.db)
     .await
     .map_err(|e| ApiError::internal(format!("Database error: {}", e)))?
-    .ok_or_else(|| ApiError::not_found("notification_template", "Notification template not found"))?;
-    
+    .ok_or_else(|| {
+        ApiError::not_found("notification_template", "Notification template not found")
+    })?;
+
     // Process template with variables
     let mut message = template.message_template.clone();
     for (key, value) in &req.template_variables {
         let placeholder = format!("{{{{{}}}}}", key); // {{variable}}
         message = message.replace(&placeholder, value);
     }
-    
+
     // For now, just log the notification - in a real implementation this would send via email/SMS/etc.
-    println!("Notification sent to {:?}: {} - {}", req.recipients, template.subject, message);
-    
+    println!(
+        "Notification sent to {:?}: {} - {}",
+        req.recipients, template.subject, message
+    );
+
     // In a real system, we'd store the notification in a queue table for processing
     // and track delivery status
-    
+
     // Log the notification for audit purposes
     sqlx::query(
         r#"

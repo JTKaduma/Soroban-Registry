@@ -1,12 +1,17 @@
-use axum::{extract::{Query, State}, Json};
+use axum::{
+    extract::{Query, State},
+    Json,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
 
+use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 use crate::type_safety::parser::parse_json_spec;
-use crate::type_safety::types::{ContractABI, ContractFunction, SorobanType, StructField, EnumVariant};
-use crate::error::{ApiError, ApiResult};
+use crate::type_safety::types::{
+    ContractABI, ContractFunction, EnumVariant, SorobanType, StructField,
+};
 
 #[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -49,13 +54,18 @@ pub async fn get_breaking_changes(
     let old_abi = resolve_abi(&state, &query.old_id).await?;
     let new_abi = resolve_abi(&state, &query.new_id).await?;
 
-    let old_spec = parse_json_spec(&old_abi, &query.old_id)
-        .map_err(|e| ApiError::bad_request("InvalidABI", format!("Failed to parse old ABI: {}", e)))?;
-    let new_spec = parse_json_spec(&new_abi, &query.new_id)
-        .map_err(|e| ApiError::bad_request("InvalidABI", format!("Failed to parse new ABI: {}", e)))?;
+    let old_spec = parse_json_spec(&old_abi, &query.old_id).map_err(|e| {
+        ApiError::bad_request("InvalidABI", format!("Failed to parse old ABI: {}", e))
+    })?;
+    let new_spec = parse_json_spec(&new_abi, &query.new_id).map_err(|e| {
+        ApiError::bad_request("InvalidABI", format!("Failed to parse new ABI: {}", e))
+    })?;
 
     let changes = diff_abi(&old_spec, &new_spec);
-    let breaking_count = changes.iter().filter(|c| c.severity == ChangeSeverity::Breaking).count();
+    let breaking_count = changes
+        .iter()
+        .filter(|c| c.severity == ChangeSeverity::Breaking)
+        .count();
     let non_breaking_count = changes.len() - breaking_count;
 
     Ok(Json(BreakingChangeReport {
@@ -71,16 +81,10 @@ pub async fn get_breaking_changes(
 pub fn diff_abi(old: &ContractABI, new: &ContractABI) -> Vec<BreakingChange> {
     let mut changes = Vec::new();
 
-    let old_funcs: HashMap<&str, &ContractFunction> = old
-        .functions
-        .iter()
-        .map(|f| (f.name.as_str(), f))
-        .collect();
-    let new_funcs: HashMap<&str, &ContractFunction> = new
-        .functions
-        .iter()
-        .map(|f| (f.name.as_str(), f))
-        .collect();
+    let old_funcs: HashMap<&str, &ContractFunction> =
+        old.functions.iter().map(|f| (f.name.as_str(), f)).collect();
+    let new_funcs: HashMap<&str, &ContractFunction> =
+        new.functions.iter().map(|f| (f.name.as_str(), f)).collect();
 
     for (name, func) in &old_funcs {
         if !new_funcs.contains_key(name) {
@@ -94,7 +98,7 @@ pub fn diff_abi(old: &ContractABI, new: &ContractABI) -> Vec<BreakingChange> {
         }
     }
 
-    for (name, _func) in &new_funcs {
+    for name in new_funcs.keys() {
         if !old_funcs.contains_key(name) {
             changes.push(BreakingChange {
                 severity: ChangeSeverity::NonBreaking,
@@ -117,7 +121,11 @@ pub fn diff_abi(old: &ContractABI, new: &ContractABI) -> Vec<BreakingChange> {
     changes
 }
 
-fn diff_function(changes: &mut Vec<BreakingChange>, old_func: &ContractFunction, new_func: &ContractFunction) {
+fn diff_function(
+    changes: &mut Vec<BreakingChange>,
+    old_func: &ContractFunction,
+    new_func: &ContractFunction,
+) {
     if old_func.params.len() != new_func.params.len() {
         changes.push(BreakingChange {
             severity: ChangeSeverity::Breaking,
@@ -203,7 +211,7 @@ fn diff_types(
         }
     }
 
-    for (name, _new_type) in new_types {
+    for name in new_types.keys() {
         if !old_types.contains_key(name) {
             changes.push(BreakingChange {
                 severity: ChangeSeverity::NonBreaking,
@@ -223,10 +231,26 @@ fn diff_type_definition(
     new_type: &SorobanType,
 ) {
     match (old_type, new_type) {
-        (SorobanType::Struct { fields: old_fields, .. }, SorobanType::Struct { fields: new_fields, .. }) => {
+        (
+            SorobanType::Struct {
+                fields: old_fields, ..
+            },
+            SorobanType::Struct {
+                fields: new_fields, ..
+            },
+        ) => {
             diff_struct_fields(changes, name, old_fields, new_fields);
         }
-        (SorobanType::Enum { variants: old_variants, .. }, SorobanType::Enum { variants: new_variants, .. }) => {
+        (
+            SorobanType::Enum {
+                variants: old_variants,
+                ..
+            },
+            SorobanType::Enum {
+                variants: new_variants,
+                ..
+            },
+        ) => {
             diff_enum_variants(changes, name, old_variants, new_variants);
         }
         _ => {
@@ -247,8 +271,10 @@ fn diff_struct_fields(
     old_fields: &[StructField],
     new_fields: &[StructField],
 ) {
-    let old_map: HashMap<&str, &StructField> = old_fields.iter().map(|f| (f.name.as_str(), f)).collect();
-    let new_map: HashMap<&str, &StructField> = new_fields.iter().map(|f| (f.name.as_str(), f)).collect();
+    let old_map: HashMap<&str, &StructField> =
+        old_fields.iter().map(|f| (f.name.as_str(), f)).collect();
+    let new_map: HashMap<&str, &StructField> =
+        new_fields.iter().map(|f| (f.name.as_str(), f)).collect();
 
     for (name, field) in &old_map {
         if let Some(new_field) = new_map.get(name) {
@@ -278,7 +304,7 @@ fn diff_struct_fields(
         }
     }
 
-    for (name, _field) in &new_map {
+    for name in new_map.keys() {
         if !old_map.contains_key(name) {
             changes.push(BreakingChange {
                 severity: ChangeSeverity::Breaking,
@@ -297,8 +323,10 @@ fn diff_enum_variants(
     old_variants: &[EnumVariant],
     new_variants: &[EnumVariant],
 ) {
-    let old_map: HashMap<&str, &EnumVariant> = old_variants.iter().map(|v| (v.name.as_str(), v)).collect();
-    let new_map: HashMap<&str, &EnumVariant> = new_variants.iter().map(|v| (v.name.as_str(), v)).collect();
+    let old_map: HashMap<&str, &EnumVariant> =
+        old_variants.iter().map(|v| (v.name.as_str(), v)).collect();
+    let new_map: HashMap<&str, &EnumVariant> =
+        new_variants.iter().map(|v| (v.name.as_str(), v)).collect();
 
     for (name, old_variant) in &old_map {
         if let Some(new_variant) = new_map.get(name) {
@@ -322,7 +350,7 @@ fn diff_enum_variants(
         }
     }
 
-    for (name, _variant) in &new_map {
+    for name in new_map.keys() {
         if !old_map.contains_key(name) {
             changes.push(BreakingChange {
                 severity: ChangeSeverity::NonBreaking,
@@ -369,22 +397,22 @@ async fn fetch_contract_uuid(state: &AppState, contract_id: &str) -> ApiResult<U
         return Ok(uuid);
     }
 
-    let uuid = sqlx::query_scalar::<_, Uuid>(
-        "SELECT id FROM contracts WHERE contract_id = $1",
-    )
-    .bind(contract_id)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|e| ApiError::internal(format!("Database error: {}", e)))?
-    .ok_or_else(|| ApiError::not_found("ContractNotFound", format!("Contract '{}' not found", contract_id)))?;
+    let uuid = sqlx::query_scalar::<_, Uuid>("SELECT id FROM contracts WHERE contract_id = $1")
+        .bind(contract_id)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|e| ApiError::internal(format!("Database error: {}", e)))?
+        .ok_or_else(|| {
+            ApiError::not_found(
+                "ContractNotFound",
+                format!("Contract '{}' not found", contract_id),
+            )
+        })?;
 
     Ok(uuid)
 }
 
-async fn fetch_latest_abi_for_contract(
-    state: &AppState,
-    contract_id: &str,
-) -> ApiResult<String> {
+async fn fetch_latest_abi_for_contract(state: &AppState, contract_id: &str) -> ApiResult<String> {
     let uuid = fetch_contract_uuid(state, contract_id).await?;
 
     if let Some(abi) = sqlx::query_scalar::<_, serde_json::Value>(
@@ -393,18 +421,22 @@ async fn fetch_latest_abi_for_contract(
     .bind(uuid)
     .fetch_optional(&state.db)
     .await
-    .map_err(|e| ApiError::internal(format!("Database error: {}", e)))? {
+    .map_err(|e| ApiError::internal(format!("Database error: {}", e)))?
+    {
         return Ok(abi.to_string());
     }
 
-    let abi = sqlx::query_scalar::<_, serde_json::Value>(
-        "SELECT abi FROM contracts WHERE id = $1",
-    )
-    .bind(uuid)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|e| ApiError::internal(format!("Database error: {}", e)))?
-    .ok_or_else(|| ApiError::not_found("AbiNotFound", format!("No ABI available for contract '{}'", contract_id)))?;
+    let abi = sqlx::query_scalar::<_, serde_json::Value>("SELECT abi FROM contracts WHERE id = $1")
+        .bind(uuid)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|e| ApiError::internal(format!("Database error: {}", e)))?
+        .ok_or_else(|| {
+            ApiError::not_found(
+                "AbiNotFound",
+                format!("No ABI available for contract '{}'", contract_id),
+            )
+        })?;
 
     Ok(abi.to_string())
 }
@@ -430,7 +462,8 @@ async fn fetch_abi_by_contract_uuid_and_version(
     .bind(version)
     .fetch_optional(&state.db)
     .await
-    .map_err(|e| ApiError::internal(format!("Database error: {}", e)))? {
+    .map_err(|e| ApiError::internal(format!("Database error: {}", e)))?
+    {
         return Ok(abi.to_string());
     }
 
@@ -441,13 +474,17 @@ async fn fetch_abi_by_contract_uuid_and_version(
 }
 
 pub fn has_breaking_changes(changes: &[BreakingChange]) -> bool {
-    changes.iter().any(|c| c.severity == ChangeSeverity::Breaking)
+    changes
+        .iter()
+        .any(|c| c.severity == ChangeSeverity::Breaking)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::type_safety::types::{ContractABI, ContractFunction, FunctionParam, FunctionVisibility};
+    use crate::type_safety::types::{
+        ContractABI, ContractFunction, FunctionParam, FunctionVisibility,
+    };
 
     fn func(name: &str, params: Vec<FunctionParam>, return_type: SorobanType) -> ContractFunction {
         ContractFunction {
@@ -484,7 +521,9 @@ mod tests {
         let new = ContractABI::new("New".to_string());
         let changes = diff_abi(&old, &new);
 
-        assert!(changes.iter().any(|c| c.category == "function_removed" && c.severity == ChangeSeverity::Breaking));
+        assert!(changes
+            .iter()
+            .any(|c| c.category == "function_removed" && c.severity == ChangeSeverity::Breaking));
     }
 
     #[test]
@@ -504,7 +543,9 @@ mod tests {
         ));
 
         let changes = diff_abi(&old, &new);
-        assert!(changes.iter().any(|c| c.category == "param_type_changed" && c.severity == ChangeSeverity::Breaking));
+        assert!(changes
+            .iter()
+            .any(|c| c.category == "param_type_changed" && c.severity == ChangeSeverity::Breaking));
     }
 
     #[test]
@@ -512,13 +553,11 @@ mod tests {
         let old = ContractABI::new("Old".to_string());
 
         let mut new = ContractABI::new("New".to_string());
-        new.functions.push(func(
-            "ping",
-            vec![],
-            SorobanType::Void,
-        ));
+        new.functions.push(func("ping", vec![], SorobanType::Void));
 
         let changes = diff_abi(&old, &new);
-        assert!(changes.iter().any(|c| c.category == "function_added" && c.severity == ChangeSeverity::NonBreaking));
+        assert!(changes
+            .iter()
+            .any(|c| c.category == "function_added" && c.severity == ChangeSeverity::NonBreaking));
     }
 }

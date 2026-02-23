@@ -18,6 +18,7 @@ use uuid::Uuid;
 use crate::{
     error::{ApiError, ApiResult},
     handlers::db_internal_error,
+    signing_handlers::create_signing_message,
     resource_tracking::ResourceUsage,
     state::AppState,
 };
@@ -354,6 +355,94 @@ pub async fn execute_proposal(
             ),
         ));
     }
+
+    // Enforce that the target contract wasm_hash has a valid Ed25519 signature
+    // recorded in contract_versions before allowing deployment to proceed.
+    // This protects against deploying unsigned or tampered binaries.
+    let (contract_id_str, version, signature, publisher_key): (String, String, Option<String>, Option<String>) =
+        sqlx::query_as(
+            r#"
+            SELECT c.contract_id, cv.version, cv.signature, cv.publisher_key
+            FROM contracts c
+            JOIN contract_versions cv ON cv.contract_id = c.id
+            WHERE c.id = $1
+              AND cv.wasm_hash = $2
+            ORDER BY cv.created_at DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(proposal.contract_id)
+        .bind(&proposal.wasm_hash)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|err| db_internal_error("lookup contract version for deployment", err))?
+        .ok_or_else(|| {
+            ApiError::bad_request(
+                "UnsignedDeployment",
+                "No signed contract version found for this deployment's wasm_hash",
+            )
+        })?;
+
+    let signature = signature.ok_or_else(|| {
+        ApiError::bad_request(
+            "UnsignedDeployment",
+            "Contract version for this deployment is missing a signature",
+        )
+    })?;
+    let publisher_key = publisher_key.ok_or_else(|| {
+        ApiError::bad_request(
+            "UnsignedDeployment",
+            "Contract version for this deployment is missing a publisher_key",
+        )
+    })?;
+
+    // Re-verify the Ed25519 signature against the deployment target hash.
+    let pk_bytes = base64::engine::general_purpose::STANDARD
+        .decode(publisher_key.trim())
+        .map_err(|_| {
+            ApiError::internal("Stored publisher_key for contract version is not valid base64")
+        })?;
+    let pk_array: [u8; 32] = pk_bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| ApiError::internal("Stored publisher_key must decode to 32 bytes"))?;
+    let verifying_key = ed25519_dalek::VerifyingKey::from_bytes(&pk_array)
+        .map_err(|_| ApiError::internal("Stored publisher_key is not a valid Ed25519 key"))?;
+
+    let sig_bytes = base64::engine::general_purpose::STANDARD
+        .decode(signature.trim())
+        .map_err(|_| {
+            ApiError::internal("Stored signature for contract version is not valid base64")
+        })?;
+    let sig_array: [u8; 64] = sig_bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| ApiError::internal("Stored signature must decode to 64 bytes"))?;
+    let signature = ed25519_dalek::Signature::from_bytes(&sig_array);
+
+    let message =
+        create_signing_message(&proposal.wasm_hash, &contract_id_str, &version);
+
+    if verifying_key.verify(&message, &signature).is_err() {
+        tracing::warn!(
+            proposal_id = %proposal_id,
+            contract_id = %proposal.contract_id,
+            wasm_hash = %proposal.wasm_hash,
+            "deployment signature verification failed"
+        );
+        return Err(ApiError::bad_request(
+            "DeploymentSignatureInvalid",
+            "Ed25519 signature verification failed for the deployment target binary",
+        ));
+    }
+
+    tracing::info!(
+        proposal_id = %proposal_id,
+        contract_id = %proposal.contract_id,
+        wasm_hash = %proposal.wasm_hash,
+        version = %version,
+        "deployment signature verified"
+    );
 
     // Mark as executed
     sqlx::query(

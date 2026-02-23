@@ -45,7 +45,7 @@ async fn perform_health_checks(pool: &PgPool) -> Result<()> {
         // contract.is_verified is available
 
         // 4. Calculate health score
-        // For now, map the existing boolean to the new graduated enum base cases. 
+        // For now, map the existing boolean to the new graduated enum base cases.
         // In a subsequent update, we could map this from a complex DB join or audit state.
         let verification_level = if contract.is_verified {
             VerificationLevel::Verified
@@ -122,7 +122,7 @@ fn calculate_health(
     // score -= 10;
 
     // Ensure score is within 0-100
-    score = score.max(0).min(100);
+    score = score.clamp(0, 100);
 
     let mut recommendations = Vec::new();
 
@@ -137,14 +137,19 @@ fn calculate_health(
 
     match verification_level {
         VerificationLevel::Unverified => {
-            recommendations.push("Verify the contract source code to improve trust and health score.".to_string());
+            recommendations.push(
+                "Verify the contract source code to improve trust and health score.".to_string(),
+            );
         }
         VerificationLevel::Pending => {
             recommendations.push("Contract verification is pending. Health score will improve once verification is complete.".to_string());
         }
         VerificationLevel::Verified => {
             // Optionally recommend an audit
-            recommendations.push("Consider obtaining an external audit to achieve maximum trust and health score.".to_string());
+            recommendations.push(
+                "Consider obtaining an external audit to achieve maximum trust and health score."
+                    .to_string(),
+            );
         }
         VerificationLevel::Audited => {
             // Maximum verification achieved
@@ -236,7 +241,9 @@ mod tests {
         // Unverified penalty: -40. Base 100 -> 60
         let health = calculate_health(&contract, None, VerificationLevel::Unverified);
         assert_eq!(health.total_score, 60);
-        assert!(health.recommendations.contains(&"Verify the contract source code to improve trust and health score.".to_string()));
+        assert!(health.recommendations.contains(
+            &"Verify the contract source code to improve trust and health score.".to_string()
+        ));
     }
 
     #[test]
@@ -254,7 +261,10 @@ mod tests {
         // Verified: +0. Base 100 -> 100
         let health = calculate_health(&contract, None, VerificationLevel::Verified);
         assert_eq!(health.total_score, 100);
-        assert!(health.recommendations.contains(&"Consider obtaining an external audit to achieve maximum trust and health score.".to_string()));
+        assert!(health.recommendations.contains(
+            &"Consider obtaining an external audit to achieve maximum trust and health score."
+                .to_string()
+        ));
     }
 
     #[test]
@@ -264,7 +274,7 @@ mod tests {
         let health = calculate_health(&contract, None, VerificationLevel::Audited);
         assert_eq!(health.total_score, 100);
     }
-    
+
     #[test]
     fn test_health_score_audited_with_inactivity() {
         let contract = build_dummy_contract();

@@ -8,8 +8,8 @@ use uuid::Uuid;
 pub struct DisasterRecoveryPlan {
     pub id: Uuid,
     pub contract_id: Uuid,
-    pub rto_minutes: i32,      // Recovery Time Objective in minutes
-    pub rpo_minutes: i32,      // Recovery Point Objective in minutes
+    pub rto_minutes: i32, // Recovery Time Objective in minutes
+    pub rpo_minutes: i32, // Recovery Point Objective in minutes
     pub recovery_strategy: String,
     pub backup_frequency_minutes: i32,
     pub created_at: DateTime<Utc>,
@@ -133,10 +133,10 @@ pub struct CreateActionItemRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct NotificationTemplate {
     pub id: Uuid,
-    pub name: String,           // e.g., 'recovery_started', 'recovery_completed'
+    pub name: String, // e.g., 'recovery_started', 'recovery_completed'
     pub subject: String,
     pub message_template: String, // Template with placeholders
-    pub channel: String,        // 'email', 'sms', 'push', 'webhook'
+    pub channel: String,          // 'email', 'sms', 'push', 'webhook'
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -153,9 +153,9 @@ pub struct CreateNotificationTemplateRequest {
 pub struct UserNotificationPreference {
     pub id: Uuid,
     pub user_id: Uuid,
-    pub contract_id: Option<Uuid>,  // If null, applies to all contracts
+    pub contract_id: Option<Uuid>, // If null, applies to all contracts
     pub notification_types: Vec<String>, // ['recovery_started', 'recovery_completed', 'incident_detected']
-    pub channels: Vec<String>,     // ['email', 'sms', 'push']
+    pub channels: Vec<String>,           // ['email', 'sms', 'push']
     pub enabled: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,

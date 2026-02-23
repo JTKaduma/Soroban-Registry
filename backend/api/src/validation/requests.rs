@@ -404,7 +404,10 @@ mod tests {
         assert_eq!(req.tags, vec!["token", "defi"]);
 
         // Source URL should be trimmed
-        assert_eq!(req.source_url, Some("https://github.com/user/repo".to_string()));
+        assert_eq!(
+            req.source_url,
+            Some("https://github.com/user/repo".to_string())
+        );
     }
 
     #[test]

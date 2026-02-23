@@ -99,7 +99,7 @@ export default function InteractionHistorySection({ contractId }: InteractionHis
                         borderRadius: '8px',
                       }}
                       labelFormatter={(v) => `Date: ${v}`}
-                      formatter={(value: number) => [value, 'Interactions']}
+                      formatter={(value: any) => [value, 'Interactions']}
                     />
                     <Bar dataKey="count" fill="rgb(59, 130, 246)" radius={[4, 4, 0, 0]} />
                   </BarChart>

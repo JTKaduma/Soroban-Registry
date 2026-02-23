@@ -7,14 +7,15 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde_json::{json, Value};
 use shared::{
-    Contract, ContractAnalyticsResponse, ContractGetResponse, ContractSearchParams,
-    ContractVersion, CreateContractVersionRequest, CreateInteractionBatchRequest,
-    CreateInteractionRequest, ContractInteractionResponse, DeploymentStats,
-    InteractionsListResponse, InteractionsQueryParams, InteractorStats, Network,
-    NetworkConfig, PaginatedResponse, PublishRequest, Publisher, SemVer,
-    TimelineEntry, TopUser,
+    Contract, ContractAnalyticsResponse, ContractGetResponse, ContractInteractionResponse,
+    ContractSearchParams, ContractVersion, CreateContractVersionRequest,
+    CreateInteractionBatchRequest, CreateInteractionRequest, DeploymentStats,
+    InteractionsListResponse, InteractionsQueryParams, InteractorStats, Network, NetworkConfig,
+    PaginatedResponse, PublishRequest, Publisher, SemVer, TimelineEntry, TopUser,
 };
 use uuid::Uuid;
 
@@ -25,32 +26,41 @@ pub struct GetContractQuery {
 }
 
 use crate::{
-    error::{ApiError, ApiResult},
     breaking_changes::{diff_abi, has_breaking_changes, resolve_abi},
+    error::{ApiError, ApiResult},
     state::AppState,
-    type_safety::{generate_openapi, to_json, to_yaml},
     type_safety::parser::parse_json_spec,
+    type_safety::{generate_openapi, to_json, to_yaml},
     dependency,
 };
 
-fn db_internal_error(operation: &str, err: sqlx::Error) -> ApiError {
+pub(crate) fn db_internal_error(operation: &str, err: sqlx::Error) -> ApiError {
     tracing::error!(operation = operation, error = ?err, "database operation failed");
     ApiError::internal("An unexpected database error occurred")
 }
 
 fn map_json_rejection(err: JsonRejection) -> ApiError {
-    ApiError::bad_request("InvalidRequest", format!("Invalid JSON payload: {}", err.body_text()))
+    ApiError::bad_request(
+        "InvalidRequest",
+        format!("Invalid JSON payload: {}", err.body_text()),
+    )
 }
 
 fn map_query_rejection(err: QueryRejection) -> ApiError {
-    ApiError::bad_request("InvalidQuery", format!("Invalid query parameters: {}", err.body_text()))
+    ApiError::bad_request(
+        "InvalidQuery",
+        format!("Invalid query parameters: {}", err.body_text()),
+    )
 }
 
 pub async fn health_check(State(state): State<AppState>) -> (StatusCode, Json<Value>) {
     let uptime = state.started_at.elapsed().as_secs();
     let now = chrono::Utc::now().to_rfc3339();
 
-    if state.is_shutting_down.load(std::sync::atomic::Ordering::SeqCst) {
+    if state
+        .is_shutting_down
+        .load(std::sync::atomic::Ordering::SeqCst)
+    {
         tracing::warn!(uptime_secs = uptime, "health check failing — shutting down");
         return (
             StatusCode::SERVICE_UNAVAILABLE,
@@ -80,7 +90,10 @@ pub async fn health_check(State(state): State<AppState>) -> (StatusCode, Json<Va
             })),
         )
     } else {
-        tracing::warn!(uptime_secs = uptime, "health check degraded — db unreachable");
+        tracing::warn!(
+            uptime_secs = uptime,
+            "health check degraded — db unreachable"
+        );
         (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(json!({
@@ -101,9 +114,9 @@ pub async fn get_stats(State(state): State<AppState>) -> ApiResult<Json<Value>> 
 
     let verified_contracts: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM contracts WHERE is_verified = true")
-        .fetch_one(&state.db)
-        .await
-        .map_err(|err| db_internal_error("count verified contracts", err))?;
+            .fetch_one(&state.db)
+            .await
+            .map_err(|err| db_internal_error("count verified contracts", err))?;
 
     let total_publishers: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM publishers")
         .fetch_one(&state.db)
@@ -126,7 +139,7 @@ pub async fn list_contracts(
         Ok(q) => q,
         Err(err) => return map_query_rejection(err).into_response(),
     };
-    
+
     let page = params.page.unwrap_or(1).max(1);
     let limit = params.limit.unwrap_or(20).clamp(1, 100);
     let offset = (page - 1).max(0) * limit;
@@ -146,7 +159,7 @@ pub async fn list_contracts(
          FROM contracts c
          LEFT JOIN contract_interactions ci ON c.id = ci.contract_id
          LEFT JOIN contract_versions cv ON c.id = cv.contract_id
-         WHERE 1=1"
+         WHERE 1=1",
     );
     let mut count_query = String::from("SELECT COUNT(*) FROM contracts WHERE 1=1");
 
@@ -197,7 +210,9 @@ pub async fn list_contracts(
     let order_by = match sort_by {
         shared::SortBy::CreatedAt => "c.created_at".to_string(),
         shared::SortBy::UpdatedAt => "c.updated_at".to_string(),
-        shared::SortBy::Popularity | shared::SortBy::Interactions => "COUNT(DISTINCT ci.id)".to_string(),
+        shared::SortBy::Popularity | shared::SortBy::Interactions => {
+            "COUNT(DISTINCT ci.id)".to_string()
+        }
         shared::SortBy::Deployments => "COUNT(DISTINCT cv.id)".to_string(),
         shared::SortBy::Relevance => {
             if let Some(ref q) = params.query {
@@ -213,25 +228,23 @@ pub async fn list_contracts(
         }
     };
 
-    let direction = if sort_order == shared::SortOrder::Asc { "ASC" } else { "DESC" };
-    
+    let direction = if sort_order == shared::SortOrder::Asc {
+        "ASC"
+    } else {
+        "DESC"
+    };
+
     query.push_str(&format!(
         " ORDER BY {} {}, c.id DESC LIMIT {} OFFSET {}",
         order_by, direction, limit, offset
     ));
 
-    let contracts: Vec<Contract> = match sqlx::query_as(&query)
-        .fetch_all(&state.db)
-        .await
-    {
+    let contracts: Vec<Contract> = match sqlx::query_as(&query).fetch_all(&state.db).await {
         Ok(rows) => rows,
         Err(err) => return db_internal_error("list contracts", err).into_response(),
     };
 
-    let total: i64 = match sqlx::query_scalar(&count_query)
-        .fetch_one(&state.db)
-        .await
-    {
+    let total: i64 = match sqlx::query_scalar(&count_query).fetch_one(&state.db).await {
         Ok(v) => v,
         Err(err) => return db_internal_error("count filtered contracts", err).into_response(),
     };
@@ -239,7 +252,8 @@ pub async fn list_contracts(
     (
         StatusCode::OK,
         Json(PaginatedResponse::new(contracts, total, page, limit)),
-    ).into_response()
+    )
+        .into_response()
 }
 
 /// Get a specific contract by ID. Optional ?network= returns network-specific config (Issue #43).
@@ -330,16 +344,103 @@ pub async fn create_contract_version(
     }
 
     let new_version = SemVer::parse(&req.version).ok_or_else(|| {
-        ApiError::bad_request("InvalidVersion", "Version must be valid semver (e.g. 1.2.3)")
+        ApiError::bad_request(
+            "InvalidVersion",
+            "Version must be valid semver (e.g. 1.2.3)",
+        )
     })?;
 
-    let existing_versions: Vec<String> = sqlx::query_scalar(
-        "SELECT version FROM contract_versions WHERE contract_id = $1",
-    )
-    .bind(contract_uuid)
-    .fetch_all(&state.db)
-    .await
-    .map_err(|err| db_internal_error("fetch contract versions", err))?;
+    // Optional Ed25519 signature verification for this contract version.
+    // When a signature is provided, we require a matching publisher_key and
+    // verify the detached signature over "{contract_id}:{version}:{wasm_hash}".
+    let (version_signature, version_publisher_key, version_algorithm) =
+        match (&req.signature, &req.publisher_key) {
+            (Some(sig), Some(pk)) if !sig.trim().is_empty() && !pk.trim().is_empty() => {
+                // Decode public key (base64, 32 bytes)
+                let pk_bytes = BASE64.decode(pk.trim()).map_err(|_| {
+                    ApiError::bad_request(
+                        "InvalidPublisherKey",
+                        "publisher_key must be valid base64-encoded Ed25519 public key",
+                    )
+                })?;
+                let pk_array: [u8; 32] = pk_bytes.as_slice().try_into().map_err(|_| {
+                    ApiError::bad_request(
+                        "InvalidPublisherKey",
+                        "publisher_key must decode to 32 bytes",
+                    )
+                })?;
+                let verifying_key = VerifyingKey::from_bytes(&pk_array).map_err(|_| {
+                    ApiError::bad_request(
+                        "InvalidPublisherKey",
+                        "publisher_key is not a valid Ed25519 public key",
+                    )
+                })?;
+
+                // Decode signature (base64, 64 bytes)
+                let sig_bytes = BASE64.decode(sig.trim()).map_err(|_| {
+                    ApiError::bad_request(
+                        "InvalidSignature",
+                        "signature must be valid base64-encoded Ed25519 signature",
+                    )
+                })?;
+                let sig_array: [u8; 64] = sig_bytes.as_slice().try_into().map_err(|_| {
+                    ApiError::bad_request("InvalidSignature", "signature must decode to 64 bytes")
+                })?;
+                let signature = Signature::from_bytes(&sig_array);
+
+                // Construct signing message and verify
+                let message = crate::signing_handlers::create_signing_message(
+                    &req.wasm_hash,
+                    &contract_id,
+                    &req.version,
+                );
+
+                let crypto_valid = verifying_key.verify(&message, &signature).is_ok();
+                if !crypto_valid {
+                    return Err(ApiError::unprocessable(
+                        "InvalidSignature",
+                        "Ed25519 signature verification failed for this contract version",
+                    ));
+                }
+
+                let algo = req
+                    .signature_algorithm
+                    .clone()
+                    .unwrap_or_else(|| "ed25519".to_string());
+
+                tracing::info!(
+                    contract_id = %contract_id,
+                    version = %req.version,
+                    wasm_hash = %req.wasm_hash,
+                    "contract version signature verified"
+                );
+
+                (
+                    Some(sig.trim().to_string()),
+                    Some(pk.trim().to_string()),
+                    Some(algo),
+                )
+            }
+            (None, None) => {
+                // No signature metadata provided – proceed without cryptographic binding.
+                (None, None, None)
+            }
+            (Some(s), None) if s.trim().is_empty() => (None, None, None),
+            (None, Some(pk)) if pk.trim().is_empty() => (None, None, None),
+            _ => {
+                return Err(ApiError::bad_request(
+                    "InvalidSignatureMetadata",
+                    "signature and publisher_key must both be provided (or both omitted)",
+                ));
+            }
+        };
+
+    let existing_versions: Vec<String> =
+        sqlx::query_scalar("SELECT version FROM contract_versions WHERE contract_id = $1")
+            .bind(contract_uuid)
+            .fetch_all(&state.db)
+            .await
+            .map_err(|err| db_internal_error("fetch contract versions", err))?;
 
     if !existing_versions.is_empty() {
         let mut parsed: Vec<SemVer> = Vec::with_capacity(existing_versions.len());
@@ -359,10 +460,18 @@ pub async fn create_contract_version(
             let old_selector = format!("{}@{}", contract_id, old_version);
             let old_abi = resolve_abi(&state, &old_selector).await?;
             let old_spec = crate::type_safety::parser::parse_json_spec(&old_abi, &contract_id)
-                .map_err(|e| ApiError::bad_request("InvalidABI", format!("Failed to parse old ABI: {}", e)))?;
+                .map_err(|e| {
+                    ApiError::bad_request("InvalidABI", format!("Failed to parse old ABI: {}", e))
+                })?;
 
-            let new_spec = crate::type_safety::parser::parse_json_spec(&req.abi.to_string(), &contract_id)
-                .map_err(|e| ApiError::bad_request("InvalidABI", format!("Failed to parse new ABI: {}", e)))?;
+            let new_spec =
+                crate::type_safety::parser::parse_json_spec(&req.abi.to_string(), &contract_id)
+                    .map_err(|e| {
+                        ApiError::bad_request(
+                            "InvalidABI",
+                            format!("Failed to parse new ABI: {}", e),
+                        )
+                    })?;
 
             let changes = diff_abi(&old_spec, &new_spec);
             if has_breaking_changes(&changes) && new_version.major == old_version.major {
@@ -384,8 +493,9 @@ pub async fn create_contract_version(
         .map_err(|err| db_internal_error("begin transaction", err))?;
 
     let version_row: ContractVersion = sqlx::query_as(
-        "INSERT INTO contract_versions (contract_id, version, wasm_hash, source_url, commit_hash, release_notes) \
-         VALUES ($1, $2, $3, $4, $5, $6) \
+        "INSERT INTO contract_versions \
+            (contract_id, version, wasm_hash, source_url, commit_hash, release_notes, signature, publisher_key, signature_algorithm) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) \
          RETURNING *",
     )
     .bind(contract_uuid)
@@ -394,6 +504,9 @@ pub async fn create_contract_version(
     .bind(&req.source_url)
     .bind(&req.commit_hash)
     .bind(&req.release_notes)
+    .bind(&version_signature)
+    .bind(&version_publisher_key)
+    .bind(&version_algorithm)
     .fetch_one(&mut *tx)
     .await
     .map_err(|err| match err {
@@ -445,7 +558,12 @@ async fn fetch_contract_identity(state: &AppState, id: &str) -> ApiResult<(Uuid,
         .fetch_optional(&state.db)
         .await
         .map_err(|err| db_internal_error("fetch contract", err))?;
-        return row.ok_or_else(|| ApiError::not_found("ContractNotFound", format!("No contract found with ID: {}", id)));
+        return row.ok_or_else(|| {
+            ApiError::not_found(
+                "ContractNotFound",
+                format!("No contract found with ID: {}", id),
+            )
+        });
     }
 
     let row = sqlx::query_as::<_, (Uuid, String)>(
@@ -456,7 +574,12 @@ async fn fetch_contract_identity(state: &AppState, id: &str) -> ApiResult<(Uuid,
     .await
     .map_err(|err| db_internal_error("fetch contract", err))?;
 
-    row.ok_or_else(|| ApiError::not_found("ContractNotFound", format!("No contract found with ID: {}", id)))
+    row.ok_or_else(|| {
+        ApiError::not_found(
+            "ContractNotFound",
+            format!("No contract found with ID: {}", id),
+        )
+    })
 }
 
 pub async fn publish_contract(
@@ -471,7 +594,7 @@ pub async fn publish_contract(
     let publisher: Publisher = sqlx::query_as(
         "INSERT INTO publishers (stellar_address) VALUES ($1)
          ON CONFLICT (stellar_address) DO UPDATE SET stellar_address = EXCLUDED.stellar_address
-         RETURNING *"
+         RETURNING *",
     )
     .bind(&req.publisher_address)
     .fetch_one(&state.db)
@@ -511,7 +634,7 @@ pub async fn publish_contract(
     .await
     .map_err(|err| {
         if let sqlx::Error::Database(ref e) = err {
-            if e.constraint().as_deref() == Some("contracts_contract_id_network_key") {
+            if e.constraint() == Some("contracts_contract_id_network_key") {
                 return ApiError::conflict(
                     "ContractAlreadyRegistered",
                     format!(
@@ -558,7 +681,7 @@ pub async fn create_publisher(
     let created: Publisher = sqlx::query_as(
         "INSERT INTO publishers (stellar_address, username, email, github_url, website)
          VALUES ($1, $2, $3, $4, $5)
-         RETURNING *"
+         RETURNING *",
     )
     .bind(&publisher.stellar_address)
     .bind(&publisher.username)
@@ -609,13 +732,12 @@ pub async fn get_publisher_contracts(
         )
     })?;
 
-    let contracts: Vec<Contract> = sqlx::query_as(
-        "SELECT * FROM contracts WHERE publisher_id = $1 ORDER BY created_at DESC",
-    )
-    .bind(publisher_uuid)
-    .fetch_all(&state.db)
-    .await
-    .map_err(|err| db_internal_error("get publisher contracts", err))?;
+    let contracts: Vec<Contract> =
+        sqlx::query_as("SELECT * FROM contracts WHERE publisher_id = $1 ORDER BY created_at DESC")
+            .bind(publisher_uuid)
+            .fetch_all(&state.db)
+            .await
+            .map_err(|err| db_internal_error("get publisher contracts", err))?;
 
     Ok(Json(contracts))
 }
@@ -627,7 +749,11 @@ pub struct ContractAbiQuery {
 }
 
 /// Fetch ABI JSON string for contract (by id or id@version)
-async fn resolve_contract_abi(state: &AppState, id: &str, version: Option<&str>) -> ApiResult<String> {
+async fn resolve_contract_abi(
+    state: &AppState,
+    id: &str,
+    version: Option<&str>,
+) -> ApiResult<String> {
     let selector = match version {
         Some(v) => format!("{}@{}", id, v),
         None => id.to_string(),
@@ -932,7 +1058,7 @@ pub async fn get_contract_interactions(
             _ => db_internal_error("get contract for interactions", err),
         })?;
 
-    let limit = params.limit.min(100).max(1);
+    let limit = params.limit.clamp(1, 100);
     let offset = params.offset.max(0);
 
     let from_ts = params
@@ -1038,10 +1164,7 @@ pub async fn post_contract_interaction(
             _ => db_internal_error("get contract for interaction", err),
         })?;
 
-    let interaction_type = req
-        .method
-        .as_deref()
-        .unwrap_or("invocation");
+    let interaction_type = req.method.as_deref().unwrap_or("invocation");
     let created_at = req.timestamp.unwrap_or_else(chrono::Utc::now);
 
     let row: (Uuid,) = sqlx::query_as(
@@ -1135,28 +1258,28 @@ pub async fn post_contract_interactions_batch(
         "contract interactions batch logged"
     );
 
-    Ok((
-        StatusCode::CREATED,
-        Json(serde_json::json!({ "ids": ids })),
-    ))
+    Ok((StatusCode::CREATED, Json(serde_json::json!({ "ids": ids }))))
 }
 
 pub async fn route_not_found() -> impl IntoResponse {
-    (StatusCode::NOT_FOUND, Json(json!({"error": "Route not found"})))
+    (
+        StatusCode::NOT_FOUND,
+        Json(json!({"error": "Route not found"})),
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use prometheus::Registry;
+    use sqlx::postgres::PgPoolOptions;
     use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
-    use sqlx::postgres::PgPoolOptions;
-    use prometheus::Registry;
 
     #[tokio::test]
     async fn test_health_check_shutdown_returns_503() {
         let is_shutting_down = Arc::new(AtomicBool::new(true));
-        
+
         // Connect lazy so it doesn't fail immediately without a DB
         let db = PgPoolOptions::new()
             .connect_lazy("postgres://postgres:postgres@localhost:5432/soroban_registry")
@@ -1165,7 +1288,7 @@ mod tests {
         let state = AppState::new(db, registry, is_shutting_down);
 
         let (status, json) = health_check(State(state)).await;
-        
+
         assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
         let value = json.0;
         assert_eq!(value["status"], "shutting_down");

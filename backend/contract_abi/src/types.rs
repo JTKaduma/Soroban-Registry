@@ -19,25 +19,41 @@ pub enum SorobanType {
     Symbol,
     String,
     Bytes,
-    BytesN { n: u32 },
+    BytesN {
+        n: u32,
+    },
     Address,
     Void,
     Timepoint,
     Duration,
-    Option { value_type: Box<SorobanType> },
+    Option {
+        value_type: Box<SorobanType>,
+    },
     Result {
         ok_type: Box<SorobanType>,
         err_type: Box<SorobanType>,
     },
-    Vec { element_type: Box<SorobanType> },
+    Vec {
+        element_type: Box<SorobanType>,
+    },
     Map {
         key_type: Box<SorobanType>,
         value_type: Box<SorobanType>,
     },
-    Tuple { elements: Vec<SorobanType> },
-    Struct { name: String, fields: Vec<StructField> },
-    Enum { name: String, variants: Vec<EnumVariant> },
-    Custom { name: String },
+    Tuple {
+        elements: Vec<SorobanType>,
+    },
+    Struct {
+        name: String,
+        fields: Vec<StructField>,
+    },
+    Enum {
+        name: String,
+        variants: Vec<EnumVariant>,
+    },
+    Custom {
+        name: String,
+    },
 }
 
 impl SorobanType {
@@ -74,7 +90,9 @@ impl SorobanType {
                 if let Some(n) = Self::extract_bytes_n(trimmed) {
                     return SorobanType::BytesN { n };
                 }
-                SorobanType::Custom { name: trimmed.to_string() }
+                SorobanType::Custom {
+                    name: trimmed.to_string(),
+                }
             }
         }
     }
@@ -117,11 +135,22 @@ impl SorobanType {
             SorobanType::Duration => "Duration".to_string(),
             SorobanType::Option { value_type } => format!("Option<{}>", value_type.display_name()),
             SorobanType::Result { ok_type, err_type } => {
-                format!("Result<{}, {}>", ok_type.display_name(), err_type.display_name())
+                format!(
+                    "Result<{}, {}>",
+                    ok_type.display_name(),
+                    err_type.display_name()
+                )
             }
             SorobanType::Vec { element_type } => format!("Vec<{}>", element_type.display_name()),
-            SorobanType::Map { key_type, value_type } => {
-                format!("Map<{}, {}>", key_type.display_name(), value_type.display_name())
+            SorobanType::Map {
+                key_type,
+                value_type,
+            } => {
+                format!(
+                    "Map<{}, {}>",
+                    key_type.display_name(),
+                    value_type.display_name()
+                )
             }
             SorobanType::Tuple { elements } => {
                 let inner: Vec<String> = elements.iter().map(|e| e.display_name()).collect();
@@ -149,17 +178,12 @@ pub struct EnumVariant {
     pub doc: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum FunctionVisibility {
+    #[default]
     Public,
     Internal,
-}
-
-impl Default for FunctionVisibility {
-    fn default() -> Self {
-        FunctionVisibility::Public
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

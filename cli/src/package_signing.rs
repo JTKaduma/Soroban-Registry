@@ -549,3 +549,65 @@ fn derive_stellar_address(public_key_bytes: &[u8; 32]) -> String {
 
     bs58::encode(&versioned).into_string()
 }
+
+/// Verify a contract binary locally against an Ed25519 signature and public key.
+/// This does not contact the registry API and is suitable for offline verification.
+pub fn verify_contract_local(
+    wasm_path: &str,
+    contract_id: &str,
+    version: &str,
+    signature_b64: &str,
+    public_key_b64: &str,
+) -> Result<()> {
+    println!("\n{}", "Verifying contract binary signature...".bold().cyan());
+
+    let wasm_bytes = read_package_file(wasm_path)?;
+    let wasm_hash = compute_hash(&wasm_bytes);
+
+    println!("  {}: {}", "Contract Path".bold(), wasm_path.bright_black());
+    println!("  {}: {}", "Hash".bold(), wasm_hash.bright_black());
+    println!("  {}: {}", "Contract ID".bold(), contract_id);
+    println!("  {}: {}", "Version".bold(), version);
+
+    // Decode public key
+    let pk_bytes = BASE64
+        .decode(public_key_b64.trim())
+        .context("Invalid public key (expected base64-encoded Ed25519 key)")?;
+    let pk_array: [u8; 32] = pk_bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("Public key must decode to 32 bytes"))?;
+    let verifying_key = ed25519_dalek::VerifyingKey::from_bytes(&pk_array)
+        .map_err(|_| anyhow::anyhow!("Public key is not a valid Ed25519 key"))?;
+
+    // Decode signature
+    let sig_bytes = BASE64
+        .decode(signature_b64.trim())
+        .context("Invalid signature (expected base64-encoded Ed25519 signature)")?;
+    let sig_array: [u8; 64] = sig_bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("Signature must decode to 64 bytes"))?;
+    let signature = ed25519_dalek::Signature::from_bytes(&sig_array);
+
+    let message = create_signing_message(&wasm_hash, contract_id, version);
+
+    let start = std::time::Instant::now();
+    let ok = verifying_key.verify(&message, &signature).is_ok();
+    let elapsed = start.elapsed();
+
+    if ok {
+        println!("{}", "\n✓ Signature is VALID".green().bold());
+        println!(
+            "  {}: {:.3} ms",
+            "Verification time".bold(),
+            elapsed.as_secs_f64() * 1000.0
+        );
+    } else {
+        println!("{}", "\n✗ Signature is INVALID".red().bold());
+        anyhow::bail!("Ed25519 verification failed for this contract binary");
+    }
+
+    println!();
+    Ok(())
+}

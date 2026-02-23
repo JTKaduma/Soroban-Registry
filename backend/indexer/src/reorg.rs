@@ -1,8 +1,7 @@
+use crate::rpc::StellarRpcClient;
 /// Ledger reorganization handling module
 /// Detects when ledgers have been reorganized on-chain and safely recovers to a checkpoint
-
 use crate::state::{IndexerState, StateManager};
-use crate::rpc::StellarRpcClient;
 use thiserror::Error;
 use tracing::{error, info, warn};
 
@@ -43,9 +42,7 @@ impl ReorgHandler {
         let _ledger = rpc_client
             .get_ledger(state.last_indexed_ledger_height)
             .await
-            .map_err(|e| {
-                ReorgError::RpcError(format!("Failed to fetch ledger: {}", e))
-            })?;
+            .map_err(|e| ReorgError::RpcError(format!("Failed to fetch ledger: {}", e)))?;
 
         // For now, we assume the current RPC endpoint is the source of truth
         // In a real scenario, you might compare against stored hashes in the database
@@ -55,9 +52,7 @@ impl ReorgHandler {
         let latest_ledger = rpc_client
             .get_latest_ledger()
             .await
-            .map_err(|e| {
-                ReorgError::RpcError(format!("Failed to fetch latest ledger: {}", e))
-            })?;
+            .map_err(|e| ReorgError::RpcError(format!("Failed to fetch latest ledger: {}", e)))?;
 
         if latest_ledger.sequence > state.last_indexed_ledger_height + 100 {
             warn!(
