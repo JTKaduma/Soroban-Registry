@@ -1,0 +1,27 @@
+#!/bin/sh
+# Soroban Lint Pre-Commit Hook
+# Installation:
+#   cp templates/pre-commit .git/hooks/pre-commit
+#   chmod +x .git/hooks/pre-commit
+
+set -e
+
+CONTRACT_PATH="${SOROBAN_CONTRACT_PATH:-./contracts}"
+
+echo "🔍 Running soroban-registry lint..."
+
+if [ ! -d "$CONTRACT_PATH" ]; then
+    echo "⚠️  Contract path not found: $CONTRACT_PATH"
+    exit 0
+fi
+
+# Run linting
+if soroban-registry lint "$CONTRACT_PATH" --level=error --format=human; then
+    echo "✅ Lint check passed!"
+    exit 0
+else
+    EXIT_CODE=$?
+    echo "❌ Lint errors found. Commit aborted."
+    echo "   Fix errors or run: soroban-registry lint $CONTRACT_PATH --fix"
+    exit "$EXIT_CODE"
+fi

@@ -24,7 +24,10 @@ impl FromStr for Severity {
             "high" => Ok(Self::High),
             "medium" => Ok(Self::Medium),
             "low" => Ok(Self::Low),
-            _ => bail!("invalid severity: {} (expected critical|high|medium|low)", s),
+            _ => bail!(
+                "invalid severity: {} (expected critical|high|medium|low)",
+                s
+            ),
         }
     }
 }
@@ -124,19 +127,12 @@ impl PatchManager {
             .await?;
 
         let data: serde_json::Value = contracts_resp.json().await?;
-        let contracts = data["items"]
-            .as_array()
-            .cloned()
-            .unwrap_or_default();
+        let contracts = data["items"].as_array().cloned().unwrap_or_default();
 
         Ok((patch, contracts))
     }
 
-    pub async fn apply(
-        api_url: &str,
-        contract_id: &str,
-        patch_id: &str,
-    ) -> Result<PatchAudit> {
+    pub async fn apply(api_url: &str, contract_id: &str, patch_id: &str) -> Result<PatchAudit> {
         let client = reqwest::Client::new();
 
         let patch_resp = client

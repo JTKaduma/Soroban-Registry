@@ -21,6 +21,10 @@ pub fn spawn_aggregation_task(pool: PgPool) {
             if let Err(err) = cleanup_old_events(&pool).await {
                 tracing::error!(error = ?err, "aggregation: retention cleanup failed");
             }
+
+            if let Err(err) = run_custom_metrics_aggregation(&pool).await {
+                tracing::error!(error = ?err, "aggregation: custom metrics aggregation failed");
+            }
         }
     });
 }
@@ -133,6 +137,103 @@ async fn cleanup_old_events(pool: &PgPool) -> Result<(), sqlx::Error> {
     if deleted > 0 {
         tracing::info!(deleted, "aggregation: cleaned up old raw events");
     }
+
+    Ok(())
+}
+
+/// Aggregate custom contract metrics into hourly and daily rollups.
+async fn run_custom_metrics_aggregation(pool: &PgPool) -> Result<(), sqlx::Error> {
+    let hourly_rows = sqlx::query(
+        r#"
+        INSERT INTO contract_custom_metrics_hourly (
+            contract_id, metric_name, metric_type,
+            bucket_start, bucket_end,
+            sample_count,
+            sum_value, avg_value, min_value, max_value,
+            p50_value, p95_value, p99_value
+        )
+        SELECT
+            contract_id,
+            metric_name,
+            metric_type,
+            date_trunc('hour', timestamp) AS bucket_start,
+            date_trunc('hour', timestamp) + INTERVAL '1 hour' AS bucket_end,
+            COUNT(*) AS sample_count,
+            SUM(value) AS sum_value,
+            AVG(value) AS avg_value,
+            MIN(value) AS min_value,
+            MAX(value) AS max_value,
+            percentile_cont(0.50) WITHIN GROUP (ORDER BY value) AS p50_value,
+            percentile_cont(0.95) WITHIN GROUP (ORDER BY value) AS p95_value,
+            percentile_cont(0.99) WITHIN GROUP (ORDER BY value) AS p99_value
+        FROM contract_custom_metrics
+        WHERE timestamp >= NOW() - INTERVAL '2 hours'
+        GROUP BY contract_id, metric_name, metric_type, date_trunc('hour', timestamp)
+        ON CONFLICT (contract_id, metric_name, metric_type, bucket_start) DO UPDATE SET
+            bucket_end   = EXCLUDED.bucket_end,
+            sample_count = EXCLUDED.sample_count,
+            sum_value    = EXCLUDED.sum_value,
+            avg_value    = EXCLUDED.avg_value,
+            min_value    = EXCLUDED.min_value,
+            max_value    = EXCLUDED.max_value,
+            p50_value    = EXCLUDED.p50_value,
+            p95_value    = EXCLUDED.p95_value,
+            p99_value    = EXCLUDED.p99_value,
+            updated_at   = NOW()
+        "#,
+    )
+    .execute(pool)
+    .await?
+    .rows_affected();
+
+    let daily_rows = sqlx::query(
+        r#"
+        INSERT INTO contract_custom_metrics_daily (
+            contract_id, metric_name, metric_type,
+            bucket_start, bucket_end,
+            sample_count,
+            sum_value, avg_value, min_value, max_value,
+            p50_value, p95_value, p99_value
+        )
+        SELECT
+            contract_id,
+            metric_name,
+            metric_type,
+            date_trunc('day', timestamp) AS bucket_start,
+            date_trunc('day', timestamp) + INTERVAL '1 day' AS bucket_end,
+            COUNT(*) AS sample_count,
+            SUM(value) AS sum_value,
+            AVG(value) AS avg_value,
+            MIN(value) AS min_value,
+            MAX(value) AS max_value,
+            percentile_cont(0.50) WITHIN GROUP (ORDER BY value) AS p50_value,
+            percentile_cont(0.95) WITHIN GROUP (ORDER BY value) AS p95_value,
+            percentile_cont(0.99) WITHIN GROUP (ORDER BY value) AS p99_value
+        FROM contract_custom_metrics
+        WHERE timestamp >= NOW() - INTERVAL '2 days'
+        GROUP BY contract_id, metric_name, metric_type, date_trunc('day', timestamp)
+        ON CONFLICT (contract_id, metric_name, metric_type, bucket_start) DO UPDATE SET
+            bucket_end   = EXCLUDED.bucket_end,
+            sample_count = EXCLUDED.sample_count,
+            sum_value    = EXCLUDED.sum_value,
+            avg_value    = EXCLUDED.avg_value,
+            min_value    = EXCLUDED.min_value,
+            max_value    = EXCLUDED.max_value,
+            p50_value    = EXCLUDED.p50_value,
+            p95_value    = EXCLUDED.p95_value,
+            p99_value    = EXCLUDED.p99_value,
+            updated_at   = NOW()
+        "#,
+    )
+    .execute(pool)
+    .await?
+    .rows_affected();
+
+    tracing::info!(
+        hourly_rows = hourly_rows,
+        daily_rows = daily_rows,
+        "aggregation: custom metrics rollups updated"
+    );
 
     Ok(())
 }

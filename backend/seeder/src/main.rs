@@ -1,3 +1,5 @@
+#![allow(dead_code, unused)]
+
 mod data;
 
 use anyhow::{Context, Result};
@@ -62,22 +64,34 @@ async fn main() -> Result<()> {
     };
 
     let publisher_count = (args.count as f64 * 0.2).ceil() as usize;
-    let publishers = data::create_publishers(&pool, publisher_count, &mut rng, custom_data.as_ref()).await?;
+    let publishers =
+        data::create_publishers(&pool, publisher_count, &mut rng, custom_data.as_ref()).await?;
     println!("{} Created {} publishers", "✓".green(), publishers.len());
 
-    let contracts = data::create_contracts(&pool, args.count, &publishers, &mut rng, custom_data.as_ref()).await?;
+    let contracts = data::create_contracts(
+        &pool,
+        args.count,
+        &publishers,
+        &mut rng,
+        custom_data.as_ref(),
+    )
+    .await?;
     println!("{} Created {} contracts", "✓".green(), contracts.len());
 
     let versions = data::create_versions(&pool, &contracts, &mut rng).await?;
-    println!("{} Created {} contract versions", "✓".green(), versions.len());
+    println!("{} Created {} contract versions", "✓".green(), versions);
 
     let verifications = data::create_verifications(&pool, &contracts, &mut rng).await?;
-    println!("{} Created {} verifications", "✓".green(), verifications.len());
+    println!("{} Created {} verifications", "✓".green(), verifications);
 
     let elapsed = start_time.elapsed();
     println!();
     println!("{}", "=".repeat(80).cyan());
-    println!("{} Seeding completed in {:.2}s", "✓".green().bold(), elapsed.as_secs_f64());
+    println!(
+        "{} Seeding completed in {:.2}s",
+        "✓".green().bold(),
+        elapsed.as_secs_f64()
+    );
     println!("{}", "=".repeat(80).cyan());
 
     Ok(())

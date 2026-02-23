@@ -1,15 +1,31 @@
 use anyhow::{Context, Result};
-use rand::{Rng, RngCore, SeedableRng};
 use rand::rngs::StdRng;
+use rand::{Rng, RngCore, SeedableRng};
 use shared::{Contract, Network, Publisher};
 use sqlx::PgPool;
 use std::collections::HashMap;
 
 const CONTRACT_NAMES: &[&str] = &[
-    "TokenSwap", "LiquidityPool", "PriceOracle", "StakingContract", "VotingSystem",
-    "NFTMarketplace", "MultiSigWallet", "EscrowService", "PaymentGateway", "IdentityVerifier",
-    "DecentralizedExchange", "YieldFarming", "LendingProtocol", "InsurancePool", "GovernanceToken",
-    "AssetRegistry", "CrossChainBridge", "DataFeed", "AutomatedMarketMaker", "RewardDistributor",
+    "TokenSwap",
+    "LiquidityPool",
+    "PriceOracle",
+    "StakingContract",
+    "VotingSystem",
+    "NFTMarketplace",
+    "MultiSigWallet",
+    "EscrowService",
+    "PaymentGateway",
+    "IdentityVerifier",
+    "DecentralizedExchange",
+    "YieldFarming",
+    "LendingProtocol",
+    "InsurancePool",
+    "GovernanceToken",
+    "AssetRegistry",
+    "CrossChainBridge",
+    "DataFeed",
+    "AutomatedMarketMaker",
+    "RewardDistributor",
 ];
 
 const DESCRIPTIONS: &[&str] = &[
@@ -26,18 +42,50 @@ const DESCRIPTIONS: &[&str] = &[
 ];
 
 const CATEGORIES: &[&str] = &[
-    "DeFi", "NFT", "Governance", "Infrastructure", "Payment", "Identity", "Gaming", "Social",
+    "DeFi",
+    "NFT",
+    "Governance",
+    "Infrastructure",
+    "Payment",
+    "Identity",
+    "Gaming",
+    "Social",
 ];
 
 const TAGS_POOL: &[&str] = &[
-    "defi", "nft", "governance", "staking", "liquidity", "swap", "oracle", "bridge",
-    "marketplace", "wallet", "payment", "identity", "verification", "voting", "token",
-    "yield", "lending", "insurance", "automation", "cross-chain",
+    "defi",
+    "nft",
+    "governance",
+    "staking",
+    "liquidity",
+    "swap",
+    "oracle",
+    "bridge",
+    "marketplace",
+    "wallet",
+    "payment",
+    "identity",
+    "verification",
+    "voting",
+    "token",
+    "yield",
+    "lending",
+    "insurance",
+    "automation",
+    "cross-chain",
 ];
 
 const PUBLISHER_NAMES: &[&str] = &[
-    "Stellar Labs", "Soroban Dev", "Crypto Innovations", "Blockchain Solutions", "DeFi Protocol",
-    "Smart Contracts Inc", "Web3 Builders", "Decentralized Systems", "Chain Developers", "Crypto Ventures",
+    "Stellar Labs",
+    "Soroban Dev",
+    "Crypto Innovations",
+    "Blockchain Solutions",
+    "DeFi Protocol",
+    "Smart Contracts Inc",
+    "Web3 Builders",
+    "Decentralized Systems",
+    "Chain Developers",
+    "Crypto Ventures",
 ];
 
 pub async fn create_publishers(
@@ -52,7 +100,9 @@ pub async fn create_publishers(
         let name = if let Some(data) = custom_data {
             if let Some(names) = data.get("publisher_names").and_then(|v| v.as_array()) {
                 if let Some(name_val) = names.get(i % names.len()) {
-                    name_val.as_str().unwrap_or(PUBLISHER_NAMES[i % PUBLISHER_NAMES.len()])
+                    name_val
+                        .as_str()
+                        .unwrap_or(PUBLISHER_NAMES[i % PUBLISHER_NAMES.len()])
                 } else {
                     PUBLISHER_NAMES[i % PUBLISHER_NAMES.len()]
                 }
@@ -106,12 +156,14 @@ pub async fn create_contracts(
 
     for i in 0..count {
         let publisher = &publishers[i % publishers.len()];
-        let network = networks[i % networks.len()];
+        let network = networks[i % networks.len()].clone();
 
         let name = if let Some(data) = custom_data {
             if let Some(names) = data.get("contract_names").and_then(|v| v.as_array()) {
                 if let Some(name_val) = names.get(i % names.len()) {
-                    name_val.as_str().unwrap_or(CONTRACT_NAMES[i % CONTRACT_NAMES.len()])
+                    name_val
+                        .as_str()
+                        .unwrap_or(CONTRACT_NAMES[i % CONTRACT_NAMES.len()])
                 } else {
                     CONTRACT_NAMES[i % CONTRACT_NAMES.len()]
                 }
@@ -124,7 +176,7 @@ pub async fn create_contracts(
 
         let description = DESCRIPTIONS[i % DESCRIPTIONS.len()];
         let category = Some(CATEGORIES[i % CATEGORIES.len()].to_string());
-        
+
         let tag_count = rng.gen_range(2..=5);
         let tags: Vec<String> = (0..tag_count)
             .map(|_| TAGS_POOL[rng.gen_range(0..TAGS_POOL.len())].to_string())
@@ -173,11 +225,11 @@ pub async fn create_versions(
 
     for contract in contracts.iter().step_by(3) {
         let version_count = rng.gen_range(1..=3);
-        
+
         for v in 1..=version_count {
             let version = format!("1.{}.0", v);
             let wasm_hash = generate_wasm_hash(rng);
-            
+
             sqlx::query(
                 "INSERT INTO contract_versions (contract_id, version, wasm_hash, source_url, commit_hash)
                  VALUES ($1, $2, $3, $4, $5)
@@ -191,7 +243,7 @@ pub async fn create_versions(
             .execute(pool)
             .await
             .context("Failed to create version")?;
-            
+
             count += 1;
         }
     }
@@ -208,8 +260,12 @@ pub async fn create_verifications(
 
     for contract in contracts.iter().step_by(2) {
         if contract.is_verified {
-            let status = if rng.gen::<f64>() < 0.9 { "verified" } else { "pending" };
-            
+            let status = if rng.gen::<f64>() < 0.9 {
+                "verified"
+            } else {
+                "pending"
+            };
+
             let result = sqlx::query(
                 "INSERT INTO verifications (contract_id, status, compiler_version, verified_at)
                  SELECT $1, $2, $3, $4
@@ -220,11 +276,15 @@ pub async fn create_verifications(
             .bind(contract.id)
             .bind(status)
             .bind("soroban-sdk-20.0.0")
-            .bind(if status == "verified" { Some(chrono::Utc::now()) } else { None })
+            .bind(if status == "verified" {
+                Some(chrono::Utc::now())
+            } else {
+                None
+            })
             .execute(pool)
             .await
             .context("Failed to create verification")?;
-            
+
             if result.rows_affected() > 0 {
                 count += 1;
             }

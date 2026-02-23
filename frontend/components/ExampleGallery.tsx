@@ -4,7 +4,10 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import ExampleCard from './ExampleCard';
+import ExampleCardSkeleton from './ExampleCardSkeleton';
 import { AlertCircle, Terminal, Search } from 'lucide-react';
+import { useAnalytics } from '@/hooks/useAnalytics';
+import { useEffect } from 'react';
 
 interface ExampleGalleryProps {
   contractId: string;
@@ -15,12 +18,40 @@ export default function ExampleGallery({ contractId }: ExampleGalleryProps) {
     queryKey: ['contract-examples', contractId],
     queryFn: () => api.getContractExamples(contractId),
   });
+  const { logEvent } = useAnalytics();
 
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
+  useEffect(() => {
+    if (!error) return;
+    logEvent('error_event', {
+      source: 'example_gallery',
+      contract_id: contractId,
+      message: 'Failed to load examples',
+    });
+  }, [error, contractId, logEvent]);
+
   if (isLoading) {
-    return <div className="animate-pulse h-64 bg-gray-100 dark:bg-gray-800 rounded-xl" />;
+    return (
+      <div className="space-y-8">
+        <div className="flex flex-col gap-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
+                Usage Examples
+              </h2>
+            </div>
+          </div>
+        </div>
+        {/* Skeleton: 1 col mobile → 2 col tablet → 3 col desktop */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+          <ExampleCardSkeleton />
+          <ExampleCardSkeleton />
+          <ExampleCardSkeleton />
+        </div>
+      </div>
+    );
   }
 
   if (error) {
@@ -48,8 +79,8 @@ export default function ExampleGallery({ contractId }: ExampleGalleryProps) {
 
   const filteredExamples = examples.filter(e => {
     const matchesCategory = selectedCategory === 'all' || e.category === selectedCategory;
-    const matchesSearch = !searchQuery.trim() || 
-      e.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
+    const matchesSearch = !searchQuery.trim() ||
+      e.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       e.description?.toLowerCase().includes(searchQuery.toLowerCase());
     return matchesCategory && matchesSearch;
   });
@@ -70,24 +101,26 @@ export default function ExampleGallery({ contractId }: ExampleGalleryProps) {
           </div>
         </div>
 
+        {/* Search + category filters: stack on mobile, row on sm+ */}
         <div className="flex flex-col sm:flex-row gap-4 justify-between">
-          <div className="relative max-w-md w-full">
+          <div className="relative w-full sm:max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input
               type="text"
               placeholder="Search examples by title or description..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-4 py-2 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+              className="w-full pl-9 pr-4 py-2 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all min-h-[44px]"
             />
           </div>
 
-          <div className="flex p-1 bg-gray-100 dark:bg-gray-800 rounded-lg overflow-x-auto">
+          {/* Category tabs: scroll horizontally on mobile if needed */}
+          <div className="flex p-1 bg-gray-100 dark:bg-gray-800 rounded-lg overflow-x-auto shrink-0">
             {categories.map((cat) => (
               <button
                 key={cat}
                 onClick={() => setSelectedCategory(cat)}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-all capitalize whitespace-nowrap ${
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-all capitalize whitespace-nowrap min-h-[44px] ${
                   selectedCategory === cat
                     ? 'bg-white dark:bg-gray-700 shadow-sm text-gray-900 dark:text-white'
                     : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
@@ -100,13 +133,20 @@ export default function ExampleGallery({ contractId }: ExampleGalleryProps) {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-8">
+      {/*
+        Responsive grid:
+        - mobile (default): 1 card per row
+        - sm / tablet 640px+: 2 cards per row
+        - lg / desktop 1024px+: 3 cards per row
+      */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
         {filteredExamples.length > 0 ? (
           filteredExamples.map((example) => (
             <ExampleCard key={example.id} example={example} />
           ))
         ) : (
-          <div className="text-center py-12 bg-gray-50 dark:bg-gray-900/50 rounded-xl">
+          // Empty state spans all columns so it stays centered
+          <div className="col-span-full text-center py-12 bg-gray-50 dark:bg-gray-900/50 rounded-xl">
             <p className="text-gray-500 dark:text-gray-400">
               No examples found matching your criteria.
             </p>

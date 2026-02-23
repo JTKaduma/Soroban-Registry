@@ -1,17 +1,43 @@
+
 'use client';
 
 import { useState } from 'react';
 import * as StellarSdk from '@stellar/stellar-sdk';
+import CodeCopyButton from './CodeCopyButton';
+import { useCopy } from '@/hooks/useCopy';
 
 interface CodeRunnerProps {
   initialCode: string;
   language: 'javascript' | 'rust';
+  copyAnalytics?: {
+    contractId?: string;
+    exampleId?: string;
+    exampleTitle?: string;
+  };
 }
 
-export default function CodeRunner({ initialCode, language }: CodeRunnerProps) {
+export default function CodeRunner({
+  initialCode,
+  language,
+  copyAnalytics,
+}: CodeRunnerProps) {
   const [code, setCode] = useState(initialCode);
   const [output, setOutput] = useState<string>('');
   const [isRunning, setIsRunning] = useState(false);
+  // Shared copy hook handles clipboard state and analytics event emission.
+  const { copy, copied, isCopying } = useCopy();
+
+  const handleCopyCode = async () => {
+    await copy(code, {
+      successEventName: 'contract_code_copied',
+      failureEventName: 'contract_code_copy_failed',
+      analyticsParams: {
+        // Context passed from parent so copied events are tied to contract/example.
+        ...copyAnalytics,
+        language,
+      },
+    });
+  };
 
   const runCode = async () => {
     if (language !== 'javascript') {
@@ -58,8 +84,9 @@ export default function CodeRunner({ initialCode, language }: CodeRunnerProps) {
       console.error = originalError;
 
       setOutput(logs.join('\n') || 'Code executed successfully (no output).');
-    } catch (err: any) {
-      setOutput(`Execution Error: ${err.message}`);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      setOutput(`Execution Error: ${message}`);
     } finally {
       setIsRunning(false);
     }
@@ -70,17 +97,20 @@ export default function CodeRunner({ initialCode, language }: CodeRunnerProps) {
       <div className="relative rounded-lg overflow-hidden border border-gray-200 dark:border-gray-800">
         <div className="bg-gray-100 dark:bg-gray-800 px-4 py-2 flex items-center justify-between border-b border-gray-200 dark:border-gray-700">
           <span className="text-xs font-mono text-gray-500 uppercase">{language}</span>
-          {language === 'javascript' && (
-            <button
-              onClick={runCode}
-              disabled={isRunning}
-              className={`px-3 py-1 rounded-md text-xs font-medium text-white transition-colors ${
-                isRunning ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700'
-              }`}
-            >
-              {isRunning ? 'Running...' : 'Run Code'}
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            <CodeCopyButton onCopy={handleCopyCode} copied={copied} disabled={isCopying} />
+            {language === 'javascript' && (
+              <button
+                onClick={runCode}
+                disabled={isRunning}
+                className={`px-3 py-1 rounded-md text-xs font-medium text-white transition-colors ${
+                  isRunning ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700'
+                }`}
+              >
+                {isRunning ? 'Running...' : 'Run Code'}
+              </button>
+            )}
+          </div>
         </div>
         <textarea
           value={code}

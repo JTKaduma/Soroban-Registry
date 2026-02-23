@@ -9,10 +9,9 @@ use shared::models::{
 };
 use uuid::Uuid;
 
+use super::db_internal_error;
 use crate::error::ApiError;
 use crate::state::AppState;
-use super::db_internal_error;
-
 
 /// Create a new migration
 pub async fn create_migration(
@@ -22,7 +21,7 @@ pub async fn create_migration(
     let migration: Migration = sqlx::query_as(
         "INSERT INTO migrations (contract_id, wasm_hash, status)
         VALUES ($1, $2, 'pending')
-        RETURNING id, contract_id, status, wasm_hash, log_output, created_at, updated_at"
+        RETURNING id, contract_id, status, wasm_hash, log_output, created_at, updated_at",
     )
     .bind(&payload.contract_id)
     .bind(&payload.wasm_hash)
@@ -43,7 +42,7 @@ pub async fn update_migration(
         "UPDATE migrations
         SET status = $1, log_output = COALESCE($2, log_output)
         WHERE id = $3
-        RETURNING id, contract_id, status, wasm_hash, log_output, created_at, updated_at"
+        RETURNING id, contract_id, status, wasm_hash, log_output, created_at, updated_at",
     )
     .bind(payload.status)
     .bind(payload.log_output)
@@ -64,7 +63,7 @@ pub async fn get_migrations(
         "SELECT id, contract_id, status, wasm_hash, log_output, created_at, updated_at
         FROM migrations
         ORDER BY created_at DESC
-        LIMIT 50"
+        LIMIT 50",
     )
     .fetch_all(&state.db)
     .await
@@ -84,13 +83,16 @@ pub async fn get_migration(
     let migration: Migration = sqlx::query_as(
         "SELECT id, contract_id, status, wasm_hash, log_output, created_at, updated_at
         FROM migrations
-        WHERE id = $1"
+        WHERE id = $1",
     )
     .bind(id)
     .fetch_optional(&state.db)
     .await
     .map_err(|e| db_internal_error("get migration", e))?
-    .ok_or(ApiError::not_found("MigrationNotFound", "Migration not found"))?;
+    .ok_or(ApiError::not_found(
+        "MigrationNotFound",
+        "Migration not found",
+    ))?;
 
     Ok(Json(migration))
 }

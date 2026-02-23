@@ -4,7 +4,6 @@
 
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
     Json,
 };
 use serde::Deserialize;
@@ -12,9 +11,10 @@ use uuid::Uuid;
 
 use crate::{
     benchmark_engine::{check_regression, format_cli_output, BenchmarkRunner, BenchmarkStats},
+    error::{ApiError, ApiResult},
     state::AppState,
 };
-use shared::models::{
+use crate::models::{
     BenchmarkComparison, BenchmarkRecord, BenchmarkResponse, BenchmarkRun, BenchmarkStatus,
     BenchmarkTrendPoint, ContractBenchmarkSummary, PerformanceAlert, RunBenchmarkRequest,
 };
@@ -27,13 +27,13 @@ pub async fn run_benchmark(
     State(state): State<AppState>,
     Path(contract_id): Path<Uuid>,
     Json(req): Json<RunBenchmarkRequest>,
-) -> Result<Json<BenchmarkResponse>, StatusCode> {
+) -> ApiResult<Json<BenchmarkResponse>> {
     // Validate contract exists
     let (contract_name,): (String,) = sqlx::query_as("SELECT name FROM contracts WHERE id = $1")
         .bind(contract_id)
         .fetch_one(&state.db)
         .await
-        .map_err(|_| StatusCode::NOT_FOUND)?;
+        .map_err(|_| ApiError::not_found("ContractNotFound", format!("No contract found with ID: {}", contract_id)))?;
 
     let iterations = req.iterations.clamp(1, 1000) as usize;
     let version = req.version.as_deref().unwrap_or("unknown");
@@ -52,14 +52,14 @@ pub async fn run_benchmark(
     .bind(&req.args_json)
     .fetch_one(&state.db)
     .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    .map_err(|_| ApiError::db_error("Failed to create benchmark record"))?;
 
     // Mark as running
     sqlx::query("UPDATE benchmark_records SET status = 'running' WHERE id = $1")
         .bind(benchmark.id)
         .execute(&state.db)
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(|_| ApiError::db_error("Failed to update benchmark status"))?;
 
     // --- Run the benchmark (blocking; move to spawn_blocking in production) ---
     let runner = BenchmarkRunner::new(req.method.clone(), iterations);
@@ -79,7 +79,7 @@ pub async fn run_benchmark(
         .bind(result.memory_bytes)
         .execute(&state.db)
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(|_| ApiError::db_error("Failed to persist benchmark run data"))?;
     }
 
     // Update record with computed stats
@@ -105,7 +105,7 @@ pub async fn run_benchmark(
     .bind(benchmark.id)
     .fetch_one(&state.db)
     .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    .map_err(|_| ApiError::db_error("Failed to update benchmark stats"))?;
 
     // Compare vs previous baseline for same method
     let maybe_previous: Option<BenchmarkRecord> = sqlx::query_as(
@@ -122,7 +122,7 @@ pub async fn run_benchmark(
     .bind(benchmark.id)
     .fetch_optional(&state.db)
     .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    .map_err(|_| ApiError::db_error("Failed to fetch previous benchmark for comparison"))?;
 
     let (comparison, alert) = if let Some(prev) = &maybe_previous {
         let comp = BenchmarkComparison {
@@ -161,7 +161,7 @@ pub async fn run_benchmark(
             .bind(req.alert_threshold_pct)
             .fetch_one(&state.db)
             .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            .map_err(|_| ApiError::db_error("Failed to create performance alert"))?;
 
             tracing::warn!(
                 contract_id = %contract_id,
@@ -185,7 +185,7 @@ pub async fn run_benchmark(
             .bind(benchmark.id)
             .fetch_all(&state.db)
             .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            .map_err(|_| ApiError::db_error("Failed to fetch benchmark runs"))?;
 
     tracing::info!(
         benchmark_id = %benchmark.id,
@@ -210,7 +210,7 @@ pub async fn list_benchmarks(
     State(state): State<AppState>,
     Path(contract_id): Path<Uuid>,
     Query(params): Query<ListBenchmarksParams>,
-) -> Result<Json<Vec<BenchmarkRecord>>, StatusCode> {
+) -> ApiResult<Json<Vec<BenchmarkRecord>>> {
     let limit = params.limit.unwrap_or(20).clamp(1, 100);
     let method_filter = params.method.as_deref().unwrap_or("%");
 
@@ -226,7 +226,7 @@ pub async fn list_benchmarks(
     .bind(limit as i64)
     .fetch_all(&state.db)
     .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    .map_err(|_| ApiError::db_error("Failed to fetch benchmark records"))?;
 
     Ok(Json(records))
 }
@@ -244,28 +244,28 @@ pub struct ListBenchmarksParams {
 pub async fn get_benchmark(
     State(state): State<AppState>,
     Path((contract_id, benchmark_id)): Path<(Uuid, Uuid)>,
-) -> Result<Json<BenchmarkResponse>, StatusCode> {
+) -> ApiResult<Json<BenchmarkResponse>> {
     let benchmark: BenchmarkRecord =
         sqlx::query_as("SELECT * FROM benchmark_records WHERE id = $1 AND contract_id = $2")
             .bind(benchmark_id)
             .bind(contract_id)
             .fetch_one(&state.db)
             .await
-            .map_err(|_| StatusCode::NOT_FOUND)?;
+            .map_err(|_| ApiError::not_found("BenchmarkNotFound", format!("No benchmark found with ID: {}", benchmark_id)))?;
 
     let runs: Vec<BenchmarkRun> =
         sqlx::query_as("SELECT * FROM benchmark_runs WHERE benchmark_id = $1 ORDER BY iteration")
             .bind(benchmark_id)
             .fetch_all(&state.db)
             .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            .map_err(|_| ApiError::db_error("Failed to fetch benchmark runs"))?;
 
     let alert: Option<PerformanceAlert> =
         sqlx::query_as("SELECT * FROM performance_alerts WHERE current_benchmark_id = $1 LIMIT 1")
             .bind(benchmark_id)
             .fetch_optional(&state.db)
             .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            .map_err(|_| ApiError::db_error("Failed to fetch performance alerts"))?;
 
     Ok(Json(BenchmarkResponse {
         benchmark,
@@ -283,7 +283,7 @@ pub async fn get_benchmark_trend(
     State(state): State<AppState>,
     Path(contract_id): Path<Uuid>,
     Query(params): Query<TrendParams>,
-) -> Result<Json<Vec<BenchmarkTrendPoint>>, StatusCode> {
+) -> ApiResult<Json<Vec<BenchmarkTrendPoint>>> {
     let method = params.method.as_deref().unwrap_or("%");
 
     let trend: Vec<BenchmarkTrendPoint> = sqlx::query_as(
@@ -306,7 +306,7 @@ pub async fn get_benchmark_trend(
     .bind(method)
     .fetch_all(&state.db)
     .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    .map_err(|_| ApiError::db_error("Failed to fetch benchmark trend data"))?;
 
     Ok(Json(trend))
 }
@@ -323,14 +323,14 @@ pub struct TrendParams {
 pub async fn get_benchmark_summary(
     State(state): State<AppState>,
     Path(contract_id): Path<Uuid>,
-) -> Result<Json<ContractBenchmarkSummary>, StatusCode> {
+) -> ApiResult<Json<ContractBenchmarkSummary>> {
     let (total_benchmarks,): (i64,) = sqlx::query_as(
         "SELECT COUNT(*) FROM benchmark_records WHERE contract_id = $1 AND status = 'completed'",
     )
     .bind(contract_id)
     .fetch_one(&state.db)
     .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    .map_err(|_| ApiError::db_error("Failed to count benchmark records"))?;
 
     let methods: Vec<(String,)> = sqlx::query_as(
         "SELECT DISTINCT method_name FROM benchmark_records WHERE contract_id = $1 AND status = 'completed' ORDER BY method_name",
@@ -338,7 +338,7 @@ pub async fn get_benchmark_summary(
     .bind(contract_id)
     .fetch_all(&state.db)
     .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    .map_err(|_| ApiError::db_error("Failed to fetch benchmarked methods"))?;
 
     let latest_benchmarks: Vec<BenchmarkRecord> = sqlx::query_as(
         r#"SELECT DISTINCT ON (method_name) *
@@ -349,7 +349,7 @@ pub async fn get_benchmark_summary(
     .bind(contract_id)
     .fetch_all(&state.db)
     .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    .map_err(|_| ApiError::db_error("Failed to fetch latest benchmarks"))?;
 
     let active_alerts: Vec<PerformanceAlert> = sqlx::query_as(
         "SELECT * FROM performance_alerts WHERE contract_id = $1 AND resolved = false ORDER BY created_at DESC",
@@ -357,7 +357,7 @@ pub async fn get_benchmark_summary(
     .bind(contract_id)
     .fetch_all(&state.db)
     .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    .map_err(|_| ApiError::db_error("Failed to fetch active performance alerts"))?;
 
     Ok(Json(ContractBenchmarkSummary {
         contract_id,
@@ -374,7 +374,7 @@ pub async fn get_benchmark_summary(
 pub async fn resolve_alert(
     State(state): State<AppState>,
     Path((contract_id, alert_id)): Path<(Uuid, Uuid)>,
-) -> Result<StatusCode, StatusCode> {
+) -> ApiResult<Json<serde_json::Value>> {
     let rows = sqlx::query(
         "UPDATE performance_alerts SET resolved = true WHERE id = $1 AND contract_id = $2",
     )
@@ -382,14 +382,17 @@ pub async fn resolve_alert(
     .bind(contract_id)
     .execute(&state.db)
     .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    .map_err(|_| ApiError::db_error("Failed to resolve performance alert"))?
     .rows_affected();
 
     if rows == 0 {
-        Err(StatusCode::NOT_FOUND)
-    } else {
-        Ok(StatusCode::NO_CONTENT)
+        return Err(ApiError::not_found(
+            "AlertNotFound",
+            format!("No performance alert found with ID: {}", alert_id),
+        ));
     }
+
+    Ok(Json(serde_json::json!({ "status": "resolved", "alert_id": alert_id.to_string() })))
 }
 
 // ─────────────────────────────────────────────────────────
@@ -399,17 +402,20 @@ pub async fn resolve_alert(
 pub async fn get_cli_output(
     State(state): State<AppState>,
     Path((contract_id, benchmark_id)): Path<(Uuid, Uuid)>,
-) -> Result<String, StatusCode> {
+) -> ApiResult<String> {
     let benchmark: BenchmarkRecord =
         sqlx::query_as("SELECT * FROM benchmark_records WHERE id = $1 AND contract_id = $2")
             .bind(benchmark_id)
             .bind(contract_id)
             .fetch_one(&state.db)
             .await
-            .map_err(|_| StatusCode::NOT_FOUND)?;
+            .map_err(|_| ApiError::not_found("BenchmarkNotFound", format!("No benchmark found with ID: {}", benchmark_id)))?;
 
     if benchmark.status != BenchmarkStatus::Completed {
-        return Err(StatusCode::UNPROCESSABLE_ENTITY);
+        return Err(ApiError::unprocessable(
+            "BenchmarkNotCompleted",
+            format!("Benchmark {} has status {:?} and cannot produce CLI output", benchmark_id, benchmark.status),
+        ));
     }
 
     let stats = BenchmarkStats {
@@ -430,7 +436,7 @@ pub async fn get_cli_output(
     .bind(benchmark_id)
     .fetch_optional(&state.db)
     .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    .map_err(|_| ApiError::db_error("Failed to fetch performance alert message"))?
     .flatten();
 
     Ok(format_cli_output(

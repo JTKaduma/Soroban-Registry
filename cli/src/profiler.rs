@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -87,7 +89,7 @@ impl Profiler {
         self.overhead_start = Instant::now();
 
         self.call_stack.push((name.to_string(), Instant::now()));
-        
+
         if let Some(parent) = self.call_stack.get(self.call_stack.len().saturating_sub(2)) {
             self.call_graph
                 .entry(parent.0.clone())
@@ -123,7 +125,7 @@ impl Profiler {
                 let total: Duration = durations.iter().sum();
                 let count = durations.len() as u64;
                 let avg = if count > 0 {
-                    total / count
+                    Duration::from_nanos(total.as_nanos() as u64 / count)
                 } else {
                     Duration::ZERO
                 };
@@ -158,6 +160,59 @@ impl Profiler {
     }
 }
 
+pub fn profile_contract(contract_path: &str, method: Option<&str>) -> Result<ProfileData> {
+    let path = Path::new(contract_path);
+    let functions = parse_contract_functions(path)?;
+
+    let start = Instant::now();
+    let mut function_profiles = HashMap::new();
+
+    for func in &functions {
+        if let Some(m) = method {
+            if func != m {
+                continue;
+            }
+        }
+
+        let func_start = Instant::now();
+        // Simulate function execution
+        let mut dummy_profiler = Profiler::new();
+        let _ = simulate_execution(path, Some(func), &mut dummy_profiler)?;
+        let func_duration = func_start.elapsed();
+
+        function_profiles.insert(
+            func.clone(),
+            FunctionProfile {
+                name: func.clone(),
+                total_time: func_duration,
+                call_count: 1,
+                avg_time: func_duration,
+                min_time: func_duration,
+                max_time: func_duration,
+                children: vec![],
+            },
+        );
+    }
+
+    let total_duration = start.elapsed();
+
+    Ok(ProfileData {
+        contract_path: contract_path.to_string(),
+        method: method.map(|s| s.to_string()),
+        timestamp: chrono::Utc::now().to_rfc3339(),
+        total_duration,
+        functions: function_profiles,
+        call_stack: vec![],
+        overhead_percent: 0.0,
+    })
+}
+
+pub fn load_baseline(baseline_path: &str) -> Result<ProfileData> {
+    let content = fs::read_to_string(baseline_path)
+        .with_context(|| format!("Failed to read baseline file: {}", baseline_path))?;
+    serde_json::from_str(&content).with_context(|| "Failed to parse baseline profile data")
+}
+
 pub fn parse_contract_functions(contract_path: &Path) -> Result<Vec<String>> {
     let content = fs::read_to_string(contract_path)
         .with_context(|| format!("Failed to read contract: {}", contract_path.display()))?;
@@ -188,10 +243,9 @@ pub fn simulate_execution(
     profiler: &mut Profiler,
 ) -> Result<()> {
     let functions = parse_contract_functions(contract_path)?;
-    
-    let target_method = method.unwrap_or_else(|| {
-        functions.first().map(|s| s.as_str()).unwrap_or("main")
-    });
+
+    let target_method =
+        method.unwrap_or_else(|| functions.first().map(|s| s.as_str()).unwrap_or("main"));
 
     if !functions.contains(&target_method.to_string()) {
         anyhow::bail!("Method '{}' not found in contract", target_method);
@@ -204,12 +258,12 @@ pub fn simulate_execution(
         if func == target_method {
             continue;
         }
-        
+
         profiler.enter_function(func);
         let func_start = Instant::now();
-        
+
         std::thread::sleep(Duration::from_micros(100));
-        
+
         let func_duration = func_start.elapsed();
         profiler.exit_function(func, func_duration);
     }
@@ -250,7 +304,7 @@ pub fn generate_flame_graph(profile: &ProfileData, output_path: &Path) -> Result
     for (idx, func) in sorted_functions.iter().take(30).enumerate() {
         let time_ratio = func.total_time.as_nanos() as f64 / max_time;
         let bar_width = width * time_ratio.min(1.0);
-        
+
         let color_class = if time_ratio > 0.7 {
             "hot"
         } else if time_ratio > 0.3 {
@@ -372,10 +426,7 @@ pub fn generate_recommendations(profile: &ProfileData) -> Vec<String> {
     let hot_functions: Vec<_> = profile
         .functions
         .values()
-        .filter(|f| {
-            f.total_time.as_nanos() as f64
-                > profile.total_duration.as_nanos() as f64 * 0.1
-        })
+        .filter(|f| f.total_time.as_nanos() as f64 > profile.total_duration.as_nanos() as f64 * 0.1)
         .collect();
 
     if !hot_functions.is_empty() {

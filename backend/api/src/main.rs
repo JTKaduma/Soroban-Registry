@@ -1,30 +1,35 @@
-mod aggregation;
-mod analytics;
-mod audit_handlers;
-mod audit_routes;
-mod benchmark_engine;
-mod benchmark_handlers;
-mod benchmark_routes;
-mod cache;
-mod cache_benchmark;
-mod checklist;
-mod contract_history_handlers;
-mod contract_history_routes;
-mod detector;
-mod error;
-mod handlers;
-mod rate_limit;
+#![allow(dead_code, unused)]
+
 mod routes;
-mod scoring;
+mod handlers;
+mod error;
 mod state;
-mod health_monitor;
+mod rate_limit;
+mod aggregation;
+mod validation;
+// mod auth;
+// mod auth_handlers;
+mod cache;
+mod metrics_handler;
+mod metrics;
+// mod resource_handlers;
+// mod resource_tracking;
+mod analytics;
+mod custom_metrics_handlers;
+mod breaking_changes;
+mod deprecation_handlers;
+mod type_safety;
+pub mod health_monitor;
 
 use anyhow::Result;
-use axum::http::{header, HeaderValue, Method};
 use axum::{middleware, Router};
+use axum::http::{header, HeaderValue, Method};
 use dotenv::dotenv;
+use prometheus::Registry;
 use sqlx::postgres::PgPoolOptions;
 use std::net::SocketAddr;
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 use tower_http::cors::CorsLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -63,8 +68,15 @@ async fn main() -> Result<()> {
     // Spawn the hourly analytics aggregation background task
     aggregation::spawn_aggregation_task(pool.clone());
 
+    // Create prometheus registry for metrics
+    let registry = Registry::new();
+    if let Err(e) = crate::metrics::register_all(&registry) {
+        tracing::error!("Failed to register metrics: {}", e);
+    }
+    
     // Create app state
-    let state = AppState::new(pool);
+    let is_shutting_down = Arc::new(AtomicBool::new(false));
+    let state = AppState::new(pool.clone(), registry, is_shutting_down.clone());
     let rate_limit_state = RateLimitState::from_env();
 
     let cors = CorsLayer::new()
@@ -81,12 +93,6 @@ async fn main() -> Result<()> {
         .merge(routes::publisher_routes())
         .merge(routes::health_routes())
         .merge(routes::migration_routes())
-        .merge(routes::canary_routes())
-        .merge(routes::ab_test_routes())
-        .merge(routes::performance_routes())
-        .merge(multisig_routes::multisig_routes())
-        .merge(audit_routes::audit_routes())
-        .merge(benchmark_routes::benchmark_routes())
         .fallback(handlers::route_not_found)
         .layer(middleware::from_fn(request_logger))
         .layer(middleware::from_fn_with_state(
@@ -95,39 +101,86 @@ async fn main() -> Result<()> {
         ))
         .layer(CorsLayer::permissive())
         .layer(cors)
-        .with_state(state.clone());
-
-    // Spawn health monitor task
-    tokio::spawn(health_monitor::run_health_monitor(state));
+        .with_state(state);
 
     // Start server
     let addr = SocketAddr::from(([0, 0, 0, 0], 3001));
     tracing::info!("API server listening on {}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(
+    let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+
+    let server = axum::serve(
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),
     )
-    .await?;
+    .with_graceful_shutdown(async move {
+        let ctrl_c = async {
+            tokio::signal::ctrl_c()
+                .await
+                .expect("failed to install Ctrl+C handler");
+        };
+
+        #[cfg(unix)]
+        let terminate = async {
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                .expect("failed to install signal handler")
+                .recv()
+                .await;
+        };
+
+        #[cfg(not(unix))]
+        let terminate = std::future::pending::<()>();
+
+        tokio::select! {
+            _ = ctrl_c => {},
+            _ = terminate => {},
+        }
+
+        tracing::info!("SIGTERM/SIGINT received. Failing health checks and stopping new requests...");
+        is_shutting_down.store(true, std::sync::atomic::Ordering::SeqCst);
+        let _ = tx.send(());
+    });
+
+    tokio::select! {
+        res = server => {
+            if let Err(e) = res {
+                tracing::error!("Server error: {}", e);
+            }
+        }
+        _ = async {
+            let _ = rx.await;
+            tracing::info!("Draining active requests (timeout: 30s)...");
+            tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
+            tracing::warn!("Drain timeout reached. Forcing shutdown...");
+        } => {}
+    }
+
+    tracing::info!("Closing database connections...");
+    pool.close().await;
+    tracing::info!("Shutdown complete");
 
     Ok(())
 }
 
 async fn request_logger(
     req: axum::http::Request<axum::body::Body>,
-    next: middleware::Next,
+    next: axum::middleware::Next,
 ) -> axum::response::Response {
+    let start = std::time::Instant::now();
     let method = req.method().clone();
     let uri = req.uri().clone();
-    let start = std::time::Instant::now();
 
-    let response = next.run(req).await;
+    let res = next.run(req).await;
+    let latency = start.elapsed();
 
-    let elapsed = start.elapsed().as_millis();
-    let status = response.status().as_u16();
+    tracing::debug!(
+        method = %method,
+        uri = %uri,
+        status = res.status().as_u16(),
+        latency = ?latency,
+        "request handled"
+    );
 
-    tracing::info!("{method} {uri} {status} {elapsed}ms");
-
-    response
+    res
 }

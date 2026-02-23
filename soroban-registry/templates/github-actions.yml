@@ -1,0 +1,60 @@
+name: Soroban Lint
+
+on: [push, pull_request]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: wasm32-unknown-unknown
+
+      - name: Cache cargo registry
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo index
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo build
+        uses: actions/cache@v3
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build soroban-registry
+        run: cargo build --release -p soroban-lint-cli
+
+      - name: Run Soroban Lint
+        run: |
+          ./target/release/soroban-registry lint ./contracts \
+            --level=error \
+            --format=json > lint-report.json || true
+
+      - name: Upload Lint Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: soroban-lint-report
+          path: lint-report.json
+
+      - name: Check Lint Results
+        run: |
+          ERROR_COUNT=$(jq '.summary.errors' lint-report.json)
+          if [ "$ERROR_COUNT" -gt 0 ]; then
+            echo "❌ Lint errors found: $ERROR_COUNT"
+            jq '.diagnostics[] | select(.severity == "error")' lint-report.json
+            exit 1
+          fi
+          echo "✅ Lint check passed!"

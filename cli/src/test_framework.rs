@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -111,7 +113,8 @@ impl CoverageTracker {
 
     fn record_contract_call(&mut self, contract: &str, method: &str) {
         self.contracts.insert(contract.to_string());
-        self.methods.insert((contract.to_string(), method.to_string()));
+        self.methods
+            .insert((contract.to_string(), method.to_string()));
     }
 
     fn calculate_metrics(&self, total_methods: usize) -> CoverageMetrics {
@@ -226,10 +229,11 @@ impl TestRunner {
             let mut assertions_failed = 0;
             let mut step_error = None;
 
-            self.coverage.record_contract_call(&step.contract, &step.method);
+            self.coverage
+                .record_contract_call(&step.contract, &step.method);
 
             let step_result = self.execute_step(step).await;
-            
+
             match step_result {
                 Ok(result) => {
                     if step.expected_error.is_some() {
@@ -242,10 +246,8 @@ impl TestRunner {
                                 Ok(false) => {
                                     assertions_failed += 1;
                                     if step_error.is_none() {
-                                        step_error = Some(format!(
-                                            "Assertion failed: {}",
-                                            assertion.r#type
-                                        ));
+                                        step_error =
+                                            Some(format!("Assertion failed: {}", assertion.r#type));
                                     }
                                 }
                                 Err(e) => {
@@ -265,7 +267,8 @@ impl TestRunner {
                         if e.to_string().contains(expected_err) {
                             assertions_passed += 1;
                         } else {
-                            step_error = Some(format!("Expected error '{}' but got: {}", expected_err, e));
+                            step_error =
+                                Some(format!("Expected error '{}' but got: {}", expected_err, e));
                             assertions_failed += 1;
                         }
                     } else {
@@ -331,7 +334,7 @@ impl TestRunner {
         )))
     }
 
-    async fn execute_action(&self, action: &TestAction) -> Result<()> {
+    async fn execute_action(&mut self, action: &TestAction) -> Result<()> {
         match action.action.as_str() {
             "deploy" => {
                 tokio::time::sleep(Duration::from_millis(5)).await;
@@ -353,12 +356,8 @@ impl TestRunner {
         let operator = assertion.operator.as_deref().unwrap_or("eq");
 
         match assertion.r#type.as_str() {
-            "equals" | "eq" => {
-                Ok(self.compare_values(result, &assertion.expected, operator))
-            }
-            "not_equals" | "ne" => {
-                Ok(!self.compare_values(result, &assertion.expected, operator))
-            }
+            "equals" | "eq" => Ok(self.compare_values(result, &assertion.expected, operator)),
+            "not_equals" | "ne" => Ok(!self.compare_values(result, &assertion.expected, operator)),
             "contains" => {
                 if let TestValue::String(s) = result {
                     if let TestValue::String(expected) = &assertion.expected {
@@ -394,7 +393,10 @@ impl TestRunner {
                 }
             }
             "event" => Ok(true),
-            _ => Err(anyhow::anyhow!("Unknown assertion type: {}", assertion.r#type)),
+            _ => Err(anyhow::anyhow!(
+                "Unknown assertion type: {}",
+                assertion.r#type
+            )),
         }
     }
 
@@ -445,7 +447,7 @@ pub fn generate_junit_xml(results: &[TestResult], output_path: &Path) -> Result<
     ));
 
     for result in results {
-        let status = if result.passed { "pass" } else { "fail" };
+        let _status = if result.passed { "pass" } else { "fail" };
         xml.push_str(&format!(
             "    <testcase name=\"{}\" classname=\"contract-test\" time=\"{:.3}\">\n",
             result.scenario,

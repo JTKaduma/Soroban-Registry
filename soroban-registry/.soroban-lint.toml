@@ -1,0 +1,27 @@
+[lint]
+level = "warning"
+
+[rules]
+missing_error_handling = "error"
+unused_variables = "warning"
+unsafe_unwrap = "error"
+integer_overflow = "error"
+reentrancy = "error"
+storage_key_collision = "error"
+missing_auth_check = "error"
+unbounded_loops = "warning"
+hardcoded_addresses = "warning"
+deprecated_api_usage = "warning"
+large_data_in_storage = "info"
+missing_events = "info"
+inefficient_clones = "warning"
+public_fn_no_doc = "info"
+unchecked_arithmetic = "error"
+direct_storage_clear = "warning"
+panic_in_contract = "error"
+missing_access_control = "error"
+type_confusion = "error"
+improper_token_handling = "error"
+
+[ignore]
+paths = ["tests/", "examples/"]

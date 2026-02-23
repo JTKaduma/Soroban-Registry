@@ -216,3 +216,206 @@ pub struct ExportRequest {
 fn default_true() -> bool {
     true
 }
+
+// ─────────────────────────────────────────────────────────
+// Compatibility matrix types
+// ─────────────────────────────────────────────────────────
+
+/// Raw database row for a compatibility entry (used by sqlx query_as!)
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct CompatibilityRow {
+    pub id: Uuid,
+    pub source_contract_id: Uuid,
+    pub source_version: String,
+    pub target_contract_id: Uuid,
+    pub target_contract_stellar_id: String,
+    pub target_contract_name: String,
+    pub target_version: String,
+    pub stellar_version: Option<String>,
+    pub is_compatible: bool,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// A single entry in the grouped compatibility matrix response
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompatibilityEntry {
+    pub target_contract_id: Uuid,
+    pub target_contract_stellar_id: String,
+    pub target_contract_name: String,
+    pub target_version: String,
+    pub stellar_version: Option<String>,
+    pub is_compatible: bool,
+}
+
+/// Full API response for GET /contracts/:id/compatibility
+#[derive(Debug, Serialize)]
+pub struct CompatibilityMatrixResponse {
+    pub contract_id: Uuid,
+    /// Keyed by source_version; each value is the list of targets
+    pub versions: std::collections::BTreeMap<String, Vec<CompatibilityEntry>>,
+    /// Human-readable warnings for incompatible pairs
+    pub warnings: Vec<String>,
+    pub total_entries: usize,
+}
+
+/// Request body for POST /contracts/:id/compatibility
+#[derive(Debug, Deserialize)]
+pub struct AddCompatibilityRequest {
+    pub source_version: String,
+    pub target_contract_id: Uuid,
+    pub target_version: String,
+    pub stellar_version: Option<String>,
+    #[serde(default = "default_true")]
+    pub is_compatible: bool,
+}
+
+/// Flat row for CSV / JSON export
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct CompatibilityExportRow {
+    pub source_version: String,
+    pub target_contract_stellar_id: String,
+    pub target_contract_name: String,
+    pub target_version: String,
+    pub stellar_version: Option<String>,
+    pub is_compatible: bool,
+}
+
+// ─────────────────────────────────────────────────────────
+// Benchmark types
+// ─────────────────────────────────────────────────────────
+
+/// Body for POST /contracts/:id/benchmarks
+#[derive(Debug, Deserialize)]
+pub struct RunBenchmarkRequest {
+    pub method: String,
+    pub iterations: i32,
+    pub version: Option<String>,
+    pub args_json: Option<serde_json::Value>,
+    #[serde(default = "default_alert_threshold")]
+    pub alert_threshold_pct: f64,
+}
+
+fn default_alert_threshold() -> f64 {
+    10.0
+}
+
+
+// --- Reviews & Ratings Models ---
+#[derive(Debug, Deserialize)]
+pub struct CreateReviewRequest {
+    pub version: String,
+    pub rating: f32,
+    pub review_text: Option<String>,
+}
+
+#[derive(Debug, Serialize, FromRow)]
+pub struct ReviewResponse {
+    pub id: i32,
+    pub contract_id: Uuid,
+    pub user_id: Uuid,
+    pub version: String,
+    pub rating: f32,
+    pub review_text: Option<String>,
+    pub helpful_count: i32,
+    pub is_flagged: bool,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ContractBenchmarkSummary {
+    pub contract_id: Uuid,
+    pub total_benchmarks: i64,
+    pub methods_benchmarked: Vec<String>,
+    pub latest_benchmarks: Vec<BenchmarkRecord>,
+    pub active_alerts: Vec<PerformanceAlert>,
+}
+
+// ─────────────────────────────────────────────────────────
+// Network Routing Types
+// ─────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum RoutingStrategy {
+    Auto,
+    Manual(String),
+}
+
+impl std::fmt::Display for RoutingStrategy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RoutingStrategy::Auto => write!(f, "auto"),
+            RoutingStrategy::Manual(s) => write!(f, "{}", s),
+        }
+    }
+}
+
+/// Metadata for network selection criteria
+#[derive(Debug, Serialize, Deserialize)]
+pub struct NetworkCriteria {
+    pub id: String,
+    pub stability: f32, // 0.0 - 1.0
+    pub cost_multiplier: f32, 
+    pub latency_ms: u32,
+}
+
+// ─────────────────────────────────────────────────────────
+// Formal Verification Types
+// ─────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, sqlx::Type)]
+#[sqlx(type_name = "verification_status", rename_all = "PascalCase")]
+pub enum VerificationStatus {
+    Proved,
+    Violated,
+    Unknown,
+    Skipped,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct FormalVerificationSession {
+    pub id: Uuid,
+    pub contract_id: Uuid,
+    pub version: String,
+    pub verifier_version: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct FormalVerificationProperty {
+    pub id: Uuid,
+    pub session_id: Uuid,
+    pub property_id: String,
+    pub description: Option<String>,
+    pub invariant: String,
+    pub severity: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct FormalVerificationResult {
+    pub id: Uuid,
+    pub property_id: Uuid,
+    pub status: VerificationStatus,
+    pub counterexample: Option<String>,
+    pub details: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct RunVerificationRequest {
+    pub properties_file: String, // could be raw TOML string or base64
+    pub verifier_version: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FormalVerificationPropertyResult {
+    pub property: FormalVerificationProperty,
+    pub result: FormalVerificationResult,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FormalVerificationReport {
+    pub session: FormalVerificationSession,
+    pub properties: Vec<FormalVerificationPropertyResult>,
+}

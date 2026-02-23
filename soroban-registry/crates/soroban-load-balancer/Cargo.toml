@@ -1,0 +1,46 @@
+[package]
+name = "soroban-load-balancer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Async runtime
+tokio = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+# Thread-safe concurrent HashMap for instance registry
+dashmap = "6"
+
+# Lock-free atomics for hot-path config swaps
+arc-swap = "1"
+
+# Efficient RwLock
+parking_lot = "0.12"
+
+# Random selection for geographic fallback
+rand = "0.8"
+
+# Existing state core client for RPC calls
+soroban-state-core = { path = "../soroban-state-core" }
+
+# Weighted selection for least-loaded algorithm
+weighted-rs = "0.1"
+
+# Colored CLI output
+colored = { workspace = true }
+
+# Time handling
+chrono = { workspace = true }
+
+# HTTP client for health checks
+reqwest = { workspace = true }
+
+# Async utilities
+futures = "0.3"
