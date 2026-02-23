@@ -30,6 +30,7 @@ use crate::{
     state::AppState,
     type_safety::{generate_openapi, to_json, to_yaml},
     type_safety::parser::parse_json_spec,
+    dependency,
 };
 
 fn db_internal_error(operation: &str, err: sqlx::Error) -> ApiError {
@@ -422,6 +423,16 @@ pub async fn create_contract_version(
         .await
         .map_err(|err| db_internal_error("commit contract version", err))?;
 
+    // Post-commit dependency analysis
+    let detected_deps = dependency::detect_dependencies_from_abi(&req.abi);
+    if !detected_deps.is_empty() {
+        if let Err(e) = dependency::save_dependencies(&state.db, contract_uuid, &detected_deps).await {
+            tracing::error!("Failed to save dependencies for version {}: {}", req.version, e);
+        }
+        // Invalidate global graph cache
+        state.cache.invalidate("system", "global:dependency_graph").await;
+    }
+
     Ok(Json(version_row))
 }
 
@@ -525,6 +536,15 @@ pub async fn publish_contract(
         .fetch_one(&state.db)
         .await
         .map_err(|err| db_internal_error("fetch contract after insert", err))?;
+
+    // Save dependencies if provided
+    if !req.dependencies.is_empty() {
+        if let Err(e) = dependency::save_dependencies(&state.db, contract.id, &req.dependencies).await {
+            tracing::error!("Failed to save initial dependencies for contract {}: {}", contract.contract_id, e);
+        }
+        // Invalidate global graph cache
+        state.cache.invalidate("system", "global:dependency_graph").await;
+    }
 
     Ok(Json(contract))
 }
@@ -767,16 +787,102 @@ pub async fn get_trust_score() -> impl IntoResponse {
     Json(json!({"score": 0}))
 }
 
-pub async fn get_contract_dependencies() -> impl IntoResponse {
-    Json(json!({"dependencies": []}))
+pub async fn get_contract_dependencies(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Value>> {
+    let contract_uuid = Uuid::parse_str(&id).map_err(|_| {
+        ApiError::bad_request("InvalidContractId", format!("Invalid ID: {}", id))
+    })?;
+
+    let deps: Vec<shared::ContractDependency> = sqlx::query_as(
+        "SELECT * FROM contract_dependencies WHERE contract_id = $1"
+    )
+    .bind(contract_uuid)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| db_internal_error("get_contract_dependencies", e))?;
+
+    Ok(Json(json!({ "dependencies": deps })))
 }
 
-pub async fn get_contract_dependents() -> impl IntoResponse {
-    Json(json!({"dependents": []}))
+pub async fn get_contract_dependents(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Value>> {
+    let contract_uuid = Uuid::parse_str(&id).map_err(|_| {
+        ApiError::bad_request("InvalidContractId", format!("Invalid ID: {}", id))
+    })?;
+
+    let dependents: Vec<shared::ContractDependency> = sqlx::query_as(
+        "SELECT * FROM contract_dependencies WHERE dependency_contract_id = $1"
+    )
+    .bind(contract_uuid)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| db_internal_error("get_contract_dependents", e))?;
+
+    Ok(Json(json!({ "dependents": dependents })))
 }
 
-pub async fn get_contract_graph() -> impl IntoResponse {
-    Json(json!({"graph": {}}))
+pub async fn get_contract_graph(State(state): State<AppState>) -> ApiResult<Json<shared::GraphResponse>> {
+    // Try cache first
+    let cache_key = "global:dependency_graph";
+    if let (Some(cached), true) = state.cache.get("system", cache_key).await {
+        if let Ok(graph) = serde_json::from_str(&cached) {
+            return Ok(Json(graph));
+        }
+    }
+
+    let graph = dependency::build_dependency_graph(&state.db).await
+        .map_err(|e| ApiError::internal(format!("Failed to build graph: {}", e)))?;
+    
+    // Invalidate/Refresh cache
+    if let Ok(serialized) = serde_json::to_string(&graph) {
+        state.cache.put("system", cache_key, serialized, Some(Duration::from_secs(300))).await;
+    }
+
+    Ok(Json(graph))
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct ImpactQuery {
+    pub change: Option<String>,
+}
+
+pub async fn get_impact_analysis(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(query): Query<ImpactQuery>,
+) -> ApiResult<Json<shared::ImpactAnalysisResponse>> {
+    let contract_uuid = Uuid::parse_str(&id).map_err(|_| {
+        ApiError::bad_request("InvalidContractId", format!("Invalid ID: {}", id))
+    })?;
+
+    let affected_ids = dependency::get_transitive_dependents(&state.db, contract_uuid).await
+        .map_err(|e| ApiError::internal(format!("Failed to get impact: {}", e)))?;
+
+    // Check for cycles involving this contract
+    let has_cycles = affected_ids.contains(&contract_uuid);
+
+    // Fetch details for affected contracts
+    let affected_contracts: Vec<shared::Contract> = if !affected_ids.is_empty() {
+        sqlx::query_as("SELECT * FROM contracts WHERE id = ANY($1)")
+            .bind(&affected_ids)
+            .fetch_all(&state.db)
+            .await
+            .map_err(|e| db_internal_error("get_impact_contracts", e))?
+    } else {
+        Vec::new()
+    };
+
+    Ok(Json(shared::ImpactAnalysisResponse {
+        contract_id: contract_uuid,
+        change_type: query.change,
+        affected_count: affected_ids.len(),
+        affected_contracts,
+        has_cycles,
+    }))
 }
 
 pub async fn get_trending_contracts() -> impl IntoResponse {

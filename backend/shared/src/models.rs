@@ -254,6 +254,16 @@ pub struct DeprecationNotification {
     pub created_at: DateTime<Utc>,
     pub acknowledged_at: Option<DateTime<Utc>>,
 }
+
+/// Response for impact analysis
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImpactAnalysisResponse {
+    pub contract_id: Uuid,
+    pub change_type: Option<String>,
+    pub affected_count: usize,
+    pub affected_contracts: Vec<Contract>,
+    pub has_cycles: bool,
+}
 /// Dependency declaration in publish request
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DependencyDeclaration {
