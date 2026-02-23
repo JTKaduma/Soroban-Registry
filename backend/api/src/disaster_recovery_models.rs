@@ -67,7 +67,42 @@ pub struct PostIncidentReport {
     pub created_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+// Database row type for PostIncidentReport (without nested action_items)
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct PostIncidentReportRow {
+    pub id: Uuid,
+    pub incident_id: Uuid,
+    pub contract_id: Uuid,
+    pub title: String,
+    pub description: String,
+    pub root_cause: String,
+    pub impact_assessment: String,
+    pub recovery_steps: Vec<String>,
+    pub lessons_learned: Vec<String>,
+    pub created_by: String,
+    pub created_at: DateTime<Utc>,
+}
+
+impl PostIncidentReportRow {
+    pub fn into_report(self, action_items: Vec<ActionItem>) -> PostIncidentReport {
+        PostIncidentReport {
+            id: self.id,
+            incident_id: self.incident_id,
+            contract_id: self.contract_id,
+            title: self.title,
+            description: self.description,
+            root_cause: self.root_cause,
+            impact_assessment: self.impact_assessment,
+            recovery_steps: self.recovery_steps,
+            lessons_learned: self.lessons_learned,
+            action_items,
+            created_by: self.created_by,
+            created_at: self.created_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct ActionItem {
     pub id: Uuid,
     pub description: String,

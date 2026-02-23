@@ -854,6 +854,19 @@ pub fn all_checks() -> Vec<ChecklistItem> {
             remediation: "Read each storage key once per function and use the cached value.".into(),
             references: vec![],
         },
+        ChecklistItem {
+            id: "SP-005".into(),
+            category: CheckCategory::StoragePatterns,
+            title: "Raw Storage Key Usage",
+            description: "Detects the use of raw strings or symbol macros for storage keys instead \
+                          of an exhaustive DataKey enum. Raw keys are prone to typo collisions.".into(),
+            severity: Severity::Medium,
+            detection: DetectionMethod::Automatic { 
+                patterns: vec!["symbol_short!(".into(), "Symbol::new(".into(), "&\"".into()] 
+            },
+            remediation: "Migrate all hardcoded string keys to a centralized `#[contracttype] pub enum DataKey`.".into(),
+            references: vec![],
+        },
 
         // ─────────────────────────────────────────
         // UPGRADEABILITY (3 items)

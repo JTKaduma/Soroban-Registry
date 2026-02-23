@@ -121,18 +121,18 @@ pub async fn send_notification(
     // and track delivery status
     
     // Log the notification for audit purposes
-    sqlx::query!(
+    sqlx::query(
         r#"
         INSERT INTO notification_logs 
         (contract_id, notification_type, recipients, message, sent_at, status)
         VALUES ($1, $2, $3, $4, $5, 'sent')
         "#,
-        req.contract_id,
-        req.notification_type,
-        &req.recipients,
-        &message,
-        Utc::now()
     )
+    .bind(req.contract_id)
+    .bind(&req.notification_type)
+    .bind(&req.recipients)
+    .bind(&message)
+    .bind(Utc::now())
     .execute(&state.db)
     .await
     .map_err(|e| ApiError::internal(format!("Failed to log notification: {}", e)))?;

@@ -1,3 +1,5 @@
+#![allow(dead_code, unused)]
+
 mod routes;
 mod handlers;
 mod error;
@@ -17,6 +19,7 @@ mod custom_metrics_handlers;
 mod breaking_changes;
 mod deprecation_handlers;
 mod type_safety;
+pub mod health_monitor;
 
 use anyhow::Result;
 use axum::{middleware, Router};

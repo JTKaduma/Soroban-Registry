@@ -248,6 +248,29 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 const USE_MOCKS = process.env.NEXT_PUBLIC_USE_MOCKS === "true";
 
 /**
+ * Helper to create a mock response with a delay
+ */
+function mockResponse<T>(data: T, delay = 300): Promise<T> {
+  return new Promise((resolve) => setTimeout(() => resolve(data), delay));
+}
+
+/**
+ * Helper to build query string from params object
+ */
+function buildQueryParams(params: Record<string, string | number | boolean | string[] | undefined>): URLSearchParams {
+  const qs = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null) continue;
+    if (Array.isArray(value)) {
+      value.forEach(v => qs.append(key, v));
+    } else {
+      qs.append(key, String(value));
+    }
+  }
+  return qs;
+}
+
+/**
  * Wrapper for API calls with consistent error handling
  */
 async function handleApiCall<T>(
@@ -418,6 +441,7 @@ export const api = {
       queryParams.append("language", language),
     );
     if (params?.author) queryParams.append("author", params.author);
+    params?.tags?.forEach((tag) => queryParams.append("tag", tag));
     // Backend expects sort_by without underscores: createdat, updatedat, popularity, deployments, interactions, relevance
     if (params?.sort_by) {
       const backendSortBy =
@@ -465,16 +489,13 @@ export const api = {
 
 
     return handleApiCall<Contract>(
-      () => fetch(`${API_URL}/api/contracts/${id}`),
+      () => {
+        const url = new URL(`${API_URL}/api/contracts/${id}`);
+        if (network != null) url.searchParams.set("network", String(network));
+        return fetch(url.toString());
+      },
       `/api/contracts/${id}`
     );
-
-    const url = new URL(`${API_URL}/api/contracts/${id}`);
-    if (network != null) url.searchParams.set("network", String(network));
-    const response = await fetch(url.toString());
-    if (!response.ok) throw new Error("Failed to fetch contract");
-    return response.json();
-
   },
 
   async getContractExamples(id: string): Promise<ContractExample[]> {
@@ -609,14 +630,6 @@ export const api = {
       }
       throw error;
     }
-    return handleApiCall<Contract>(
-      () => fetch(`${API_URL}/api/contracts`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      }),
-      '/api/contracts'
-    );
   },
 
   async getContractHealth(id: string): Promise<ContractHealth> {
@@ -964,6 +977,7 @@ export interface FormalVerificationPropertyResult {
 
 export interface FormalVerificationReport {
   session: FormalVerificationSession;
+
   properties: FormalVerificationPropertyResult[];
 }
 

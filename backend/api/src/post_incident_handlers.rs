@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::{
     disaster_recovery_models::{
-        ActionItem, CreateActionItemRequest, CreatePostIncidentReportRequest, PostIncidentReport
+        ActionItem, CreateActionItemRequest, CreatePostIncidentReportRequest, PostIncidentReport, PostIncidentReportRow
     },
     error::{ApiError, ApiResult},
     state::AppState,
@@ -18,7 +18,7 @@ pub async fn create_post_incident_report(
     State(state): State<AppState>,
     Json(req): Json<CreatePostIncidentReportRequest>,
 ) -> ApiResult<Json<PostIncidentReport>> {
-    let report = sqlx::query_as::<_, PostIncidentReport>(
+    let report_row = sqlx::query_as::<_, PostIncidentReportRow>(
         r#"
         INSERT INTO post_incident_reports 
         (incident_id, contract_id, title, description, root_cause, impact_assessment, recovery_steps, lessons_learned, created_by)
@@ -41,45 +41,40 @@ pub async fn create_post_incident_report(
 
     // Create action items associated with this report
     for action_item in req.action_items {
-        sqlx::query!(
+        sqlx::query(
             r#"
             INSERT INTO action_items 
             (report_id, description, owner, due_date, status)
             VALUES ($1, $2, $3, $4, $5)
             "#,
-            report.id,
-            action_item.description,
-            action_item.owner,
-            action_item.due_date,
-            "todo" // Default status
         )
+        .bind(report_row.id)
+        .bind(&action_item.description)
+        .bind(&action_item.owner)
+        .bind(action_item.due_date)
+        .bind("todo") // Default status
         .execute(&state.db)
         .await
         .map_err(|e| ApiError::internal(format!("Failed to create action item: {}", e)))?;
     }
 
-    // Fetch the report with action items
-    let mut final_report = report;
+    // Fetch the action items
     let action_items = sqlx::query_as::<_, ActionItem>(
         "SELECT * FROM action_items WHERE report_id = $1 ORDER BY created_at ASC",
     )
-    .bind(final_report.id)
+    .bind(report_row.id)
     .fetch_all(&state.db)
     .await
     .map_err(|e| ApiError::internal(format!("Failed to fetch action items: {}", e)))?;
 
-    // In a real implementation, we would update the final_report.action_items field
-    // But since it's not a direct DB field, we'll just return the report as-is
-    // and the action items would be fetched separately if needed
-
-    Ok(Json(final_report))
+    Ok(Json(report_row.into_report(action_items)))
 }
 
 pub async fn get_post_incident_report(
     State(state): State<AppState>,
     Path(report_id): Path<Uuid>,
 ) -> ApiResult<Json<PostIncidentReport>> {
-    let report = sqlx::query_as::<_, PostIncidentReport>(
+    let report_row = sqlx::query_as::<_, PostIncidentReportRow>(
         "SELECT * FROM post_incident_reports WHERE id = $1",
     )
     .bind(report_id)
@@ -88,20 +83,41 @@ pub async fn get_post_incident_report(
     .map_err(|e| ApiError::internal(format!("Database error: {}", e)))?
     .ok_or_else(|| ApiError::not_found("post_incident_report", "Post-incident report not found"))?;
 
-    Ok(Json(report))
+    let action_items = sqlx::query_as::<_, ActionItem>(
+        "SELECT * FROM action_items WHERE report_id = $1 ORDER BY created_at ASC",
+    )
+    .bind(report_row.id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| ApiError::internal(format!("Failed to fetch action items: {}", e)))?;
+
+    Ok(Json(report_row.into_report(action_items)))
 }
 
 pub async fn get_contract_post_incident_reports(
     State(state): State<AppState>,
     Path(contract_id): Path<Uuid>,
 ) -> ApiResult<Json<Vec<PostIncidentReport>>> {
-    let reports = sqlx::query_as::<_, PostIncidentReport>(
+    let report_rows = sqlx::query_as::<_, PostIncidentReportRow>(
         "SELECT * FROM post_incident_reports WHERE contract_id = $1 ORDER BY created_at DESC",
     )
     .bind(contract_id)
     .fetch_all(&state.db)
     .await
     .map_err(|e| ApiError::internal(format!("Database error: {}", e)))?;
+
+    // For each report, fetch action items (could be optimized with a JOIN in production)
+    let mut reports = Vec::with_capacity(report_rows.len());
+    for row in report_rows {
+        let action_items = sqlx::query_as::<_, ActionItem>(
+            "SELECT * FROM action_items WHERE report_id = $1 ORDER BY created_at ASC",
+        )
+        .bind(row.id)
+        .fetch_all(&state.db)
+        .await
+        .map_err(|e| ApiError::internal(format!("Failed to fetch action items: {}", e)))?;
+        reports.push(row.into_report(action_items));
+    }
 
     Ok(Json(reports))
 }
@@ -118,11 +134,11 @@ pub async fn update_action_item_status(
         ));
     }
 
-    sqlx::query!(
+    sqlx::query(
         "UPDATE action_items SET status = $1, updated_at = NOW() WHERE id = $2",
-        status,
-        action_item_id
     )
+    .bind(&status)
+    .bind(action_item_id)
     .execute(&state.db)
     .await
     .map_err(|e| ApiError::internal(format!("Failed to update action item: {}", e)))?;
