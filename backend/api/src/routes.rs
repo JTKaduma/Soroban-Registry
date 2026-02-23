@@ -4,11 +4,6 @@ use axum::{
 };
 
 use crate::{
-    backup_routes,
-    notification_routes,
-    post_incident_routes,
-    handlers, metrics_handler, breaking_changes,
-    handlers, metrics_handler, deprecation_handlers,
     handlers, metrics_handler, custom_metrics_handlers,
     breaking_changes,
     deprecation_handlers,
@@ -76,9 +71,9 @@ pub fn contract_routes() -> Router<AppState> {
         // )
         .route("/api/contracts/:id/deployments/status", get(handlers::get_deployment_status))
         .route("/api/deployments/green", post(handlers::deploy_green))
-        .merge(backup_routes::backup_routes())
-        .merge(notification_routes::notification_routes())
-        .merge(post_incident_routes::post_incident_routes())
+        // .merge(backup_routes::backup_routes())
+        // .merge(notification_routes::notification_routes())
+        // .merge(post_incident_routes::post_incident_routes())
 }
 
 pub fn publisher_routes() -> Router<AppState> {

@@ -1591,3 +1591,23 @@ pub struct TransparencyLogQueryParams {
     pub limit: Option<i64>,
     pub offset: Option<i64>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type, PartialEq)]
+#[sqlx(type_name = "health_status", rename_all = "snake_case")]
+pub enum HealthStatus {
+    Healthy,
+    Warning,
+    Critical,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct ContractHealth {
+    pub contract_id: Uuid,
+    pub status: HealthStatus,
+    pub last_activity: DateTime<Utc>,
+    pub security_score: i32,
+    pub audit_date: Option<DateTime<Utc>>,
+    pub total_score: i32,
+    pub recommendations: Vec<String>,
+    pub updated_at: DateTime<Utc>,
+}
