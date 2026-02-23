@@ -60,6 +60,18 @@ pub enum Commands {
         /// Only show verified contracts
         #[arg(long)]
         verified_only: bool,
+        /// Filter by one or more networks (comma-separated: mainnet,testnet,futurenet)
+        #[arg(long)]
+        networks: Option<String>,
+        /// Filter by contract category (e.g. DEX, token, lending, oracle)
+        #[arg(long)]
+        category: Option<String>,
+        /// Maximum number of results to return
+        #[arg(long, default_value = "20")]
+        limit: usize,
+        /// Number of results to skip (for pagination)
+        #[arg(long, default_value = "0")]
+        offset: usize,
         /// Output results as machine-readable JSON
         #[arg(long)]
         json: bool,
@@ -751,14 +763,34 @@ async fn main() -> Result<()> {
         Commands::Search {
             query,
             verified_only,
+            networks,
+            category,
+            limit,
+            offset,
             json,
         } => {
+            let networks_vec: Vec<String> = networks
+                .map(|n| n.split(',').map(|s| s.trim().to_string()).collect())
+                .unwrap_or_default();
             log::debug!(
-                "Command: search | query={:?} verified_only={}",
+                "Command: search | query={:?} verified_only={} networks={:?} category={:?}",
                 query,
-                verified_only
+                verified_only,
+                networks_vec,
+                category
             );
-            commands::search(&cli.api_url, &query, network, verified_only, json).await?;
+            commands::search(
+                &cli.api_url,
+                &query,
+                network,
+                verified_only,
+                networks_vec,
+                category.as_deref(),
+                limit,
+                offset,
+                json,
+            )
+            .await?;
         }
         Commands::Info { contract_id } => {
             log::debug!("Command: info | contract_id={}", contract_id);

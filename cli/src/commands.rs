@@ -26,16 +26,31 @@ pub async fn search(
     query: &str,
     network: Network,
     verified_only: bool,
-	 json: bool,
+    networks: Vec<String>,
+    category: Option<&str>,
+    limit: usize,
+    offset: usize,
+    json: bool,
 ) -> Result<()> {
     let client = reqwest::Client::new();
+
     let mut url = format!(
-        "{}/api/contracts?query={}&network={}",
-        api_url, query, network
+        "{}/api/contracts?query={}&limit={}&offset={}",
+        api_url, query, limit, offset
     );
+
+    if !networks.is_empty() {
+        url.push_str(&format!("&networks={}", networks.join(",")));
+    } else {
+        url.push_str(&format!("&network={}", network));
+    }
 
     if verified_only {
         url.push_str("&verified_only=true");
+    }
+
+    if let Some(cat) = category {
+        url.push_str(&format!("&category={}", cat));
     }
 
     let response = client
@@ -47,25 +62,62 @@ pub async fn search(
     let data: serde_json::Value = response.json().await?;
     let items = data["items"].as_array().context("Invalid response")?;
 
-	 if json {
+    if json {
         let contracts: Vec<serde_json::Value> = items
             .iter()
-            .map(|c| -> Result<_> { Ok(serde_json::json!({
-                "id":          crate::conversions::as_str(&c["contract_id"], "contract_id")?,
-                "name":        crate::conversions::as_str(&c["name"], "name")?,
-                "is_verified": crate::conversions::as_bool(&c["is_verified"], "is_verified")?,
-                "network":     crate::conversions::as_str(&c["network"], "network")?,
-            })) })
+            .map(|c| -> Result<_> {
+                Ok(serde_json::json!({
+                    "id":          crate::conversions::as_str(&c["contract_id"], "contract_id")?,
+                    "name":        crate::conversions::as_str(&c["name"], "name")?,
+                    "is_verified": crate::conversions::as_bool(&c["is_verified"], "is_verified")?,
+                    "network":     crate::conversions::as_str(&c["network"], "network")?,
+                    "category":    c["category"].as_str().unwrap_or(""),
+                }))
+            })
             .collect::<Result<_, _>>()?;
-        println!("{}", serde_json::to_string_pretty(&serde_json::json!({ "contracts": contracts }))?);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({ "contracts": contracts }))?
+        );
         return Ok(());
     }
 
     println!("\n{}", "Search Results:".bold().cyan());
     println!("{}", "=".repeat(80).cyan());
 
+    // Show active filters
+    let mut active_filters: Vec<String> = Vec::new();
+    if !networks.is_empty() {
+        active_filters.push(format!("networks: {}", networks.join(", ")));
+    }
+    if let Some(cat) = category {
+        active_filters.push(format!("category: {}", cat));
+    }
+    if verified_only {
+        active_filters.push("verified only".to_string());
+    }
+    if !active_filters.is_empty() {
+        println!(
+            "  {} {}\n",
+            "Active filters:".bold(),
+            active_filters.join(" | ").bright_blue()
+        );
+    }
+
     if items.is_empty() {
-        println!("{}", "No contracts found.".yellow());
+        println!("{}", "No contracts found matching your filters.".yellow());
+        println!("\n{}", "Suggestions:".bold());
+        println!("  • Try a broader search query");
+        if category.is_some() {
+            println!("  • Remove the --category filter to see all contract types");
+        }
+        if !networks.is_empty() {
+            println!("  • Try adding more networks: --networks mainnet,testnet,futurenet");
+        }
+        if verified_only {
+            println!("  • Remove --verified-only to include unverified contracts");
+        }
+        println!("  • Use 'list' command to browse all contracts\n");
         return Ok(());
     }
 
@@ -77,7 +129,7 @@ pub async fn search(
 
         println!("\n{} {}", "●".green(), name.bold());
         println!("  ID: {}", contract_id.bright_black());
-        println!(
+        print!(
             "  Status: {} | Network: {}",
             if is_verified {
                 "✓ Verified".green()
@@ -87,13 +139,20 @@ pub async fn search(
             network.bright_blue()
         );
 
+        if let Some(cat) = contract["category"].as_str() {
+            if !cat.is_empty() {
+                print!(" | Category: {}", cat.bright_magenta());
+            }
+        }
+        println!();
+
         if let Some(desc) = contract["description"].as_str() {
             println!("  {}", desc.bright_black());
         }
     }
 
     println!("\n{}", "=".repeat(80).cyan());
-    println!("Found {} contract(s)\n", items.len());
+    println!("Found {} contract(s) (offset: {})\n", items.len(), offset);
 
     Ok(())
 }
