@@ -1,6 +1,7 @@
 #![allow(unused_variables)]
 
 mod backup;
+mod batch_verify;
 mod commands;
 mod config;
 mod conversions;
@@ -422,6 +423,22 @@ pub enum Commands {
     Keys {
         #[command(subcommand)]
         action: KeysCommands,
+    },
+
+    /// Verify multiple contracts in a single atomic batch (all succeed or all rollback)
+    BatchVerify {
+        /// Comma-separated list of contract IDs to verify.
+        /// Optionally suffix with @version (e.g. abc123@1.0.0,def456)
+        #[arg(long)]
+        contracts: String,
+
+        /// Stellar address or username initiating the batch (recorded in audit log)
+        #[arg(long)]
+        initiated_by: String,
+
+        /// Output results as machine-readable JSON
+        #[arg(long)]
+        json: bool,
     },
 
     /// Manage webhooks for contract lifecycle events
@@ -1120,7 +1137,23 @@ async fn main() -> Result<()> {
             compare,
             recommendations,
         } => {
-            println!("Profile command is temporarily disabled");
+            log::debug!(
+                "Command: profile | contract_path={} method={:?} output={:?} flamegraph={:?} compare={:?} recommendations={}",
+                contract_path,
+                method,
+                output,
+                flamegraph,
+                compare,
+                recommendations
+            );
+            commands::profile(
+                &contract_path,
+                method.as_deref(),
+                output.as_deref(),
+                flamegraph.as_deref(),
+                compare.as_deref(),
+                recommendations,
+            )?;
         }
         Commands::Test {
             test_file,
@@ -1331,6 +1364,18 @@ async fn main() -> Result<()> {
                 .await?;
             }
         },
+        Commands::BatchVerify {
+            contracts,
+            initiated_by,
+            json,
+        } => {
+            log::debug!(
+                "Command: batch-verify | contracts={} initiated_by={}",
+                contracts,
+                initiated_by
+            );
+            batch_verify::run_batch_verify(&cli.api_url, &contracts, &initiated_by, json).await?;
+        }
         Commands::Webhook { action } => match action {
             WebhookCommands::Create { url, events, secret } => {
                 let event_list: Vec<String> =
