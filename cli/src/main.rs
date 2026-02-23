@@ -20,6 +20,7 @@ mod patch;
 mod profiler;
 mod sla;
 mod test_framework;
+mod webhook;
 mod wizard;
 
 use anyhow::Result;
@@ -388,6 +389,12 @@ pub enum Commands {
         #[command(subcommand)]
         action: KeysCommands,
     },
+
+    /// Manage webhooks for contract lifecycle events
+    Webhook {
+        #[command(subcommand)]
+        action: WebhookCommands,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -608,7 +615,74 @@ pub enum KeysCommands {
     },
 }
 
-/// Sub-commands for contract migration workflow
+/// Sub-commands for the `webhook` group
+#[derive(Debug, Subcommand)]
+pub enum WebhookCommands {
+    /// Register a new webhook subscription
+    Create {
+        /// Endpoint URL to receive events (must be HTTPS in production)
+        #[arg(long)]
+        url: String,
+
+        /// Comma-separated list of events to subscribe to.
+        /// Valid: contract.published, contract.verified,
+        ///        contract.failed_verification, version.created
+        #[arg(long)]
+        events: String,
+
+        /// Optional HMAC-SHA256 secret key (auto-generated if omitted)
+        #[arg(long)]
+        secret: Option<String>,
+    },
+
+    /// List all registered webhooks
+    List {},
+
+    /// Delete a webhook by ID
+    Delete {
+        /// Webhook ID to delete
+        webhook_id: String,
+    },
+
+    /// Send a test event to a webhook
+    Test {
+        /// Webhook ID to test
+        webhook_id: String,
+    },
+
+    /// View delivery logs for a webhook
+    Logs {
+        /// Webhook ID
+        webhook_id: String,
+
+        /// Maximum number of log entries to show
+        #[arg(long, default_value = "20")]
+        limit: usize,
+    },
+
+    /// Manually retry a dead-letter delivery
+    Retry {
+        /// Delivery ID to retry
+        delivery_id: String,
+    },
+
+    /// Verify a webhook payload signature locally
+    VerifySig {
+        /// HMAC secret key used for signing
+        #[arg(long)]
+        secret: String,
+
+        /// Raw JSON payload body
+        #[arg(long)]
+        payload: String,
+
+        /// Signature header value (e.g. sha256=abc123...)
+        #[arg(long)]
+        signature: String,
+    },
+}
+
+/// Sub-commands for the `migrate` group
 #[derive(Debug, Subcommand)]
 pub enum MigrateCommands {
     /// Preview migration outcome (dry-run)
@@ -1180,6 +1254,39 @@ async fn main() -> Result<()> {
                     limit,
                 )
                 .await?;
+            }
+        },
+        Commands::Webhook { action } => match action {
+            WebhookCommands::Create { url, events, secret } => {
+                let event_list: Vec<String> =
+                    events.split(',').map(|s| s.trim().to_string()).collect();
+                log::debug!("Command: webhook create | url={} events={:?}", url, event_list);
+                webhook::create_webhook(&cli.api_url, &url, event_list, secret.as_deref())
+                    .await?;
+            }
+            WebhookCommands::List {} => {
+                log::debug!("Command: webhook list");
+                webhook::list_webhooks(&cli.api_url).await?;
+            }
+            WebhookCommands::Delete { webhook_id } => {
+                log::debug!("Command: webhook delete | id={}", webhook_id);
+                webhook::delete_webhook(&cli.api_url, &webhook_id).await?;
+            }
+            WebhookCommands::Test { webhook_id } => {
+                log::debug!("Command: webhook test | id={}", webhook_id);
+                webhook::test_webhook(&cli.api_url, &webhook_id).await?;
+            }
+            WebhookCommands::Logs { webhook_id, limit } => {
+                log::debug!("Command: webhook logs | id={} limit={}", webhook_id, limit);
+                webhook::webhook_logs(&cli.api_url, &webhook_id, limit).await?;
+            }
+            WebhookCommands::Retry { delivery_id } => {
+                log::debug!("Command: webhook retry | delivery_id={}", delivery_id);
+                webhook::retry_delivery(&cli.api_url, &delivery_id).await?;
+            }
+            WebhookCommands::VerifySig { secret, payload, signature } => {
+                log::debug!("Command: webhook verify-sig");
+                webhook::verify_signature_cmd(&secret, &payload, &signature)?;
             }
         },
     }
