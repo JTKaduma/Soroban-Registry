@@ -21,6 +21,9 @@ mod breaking_changes;
 mod deprecation_handlers;
 mod type_safety;
 pub mod health_monitor;
+mod health;
+#[cfg(test)]
+mod health_tests;
 
 use anyhow::Result;
 use axum::{middleware, Router};
