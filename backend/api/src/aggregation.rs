@@ -1,5 +1,6 @@
 use sqlx::PgPool;
 use std::time::Duration;
+use chrono::Timelike;
 
 /// Spawn the background aggregation task.
 ///
@@ -24,6 +25,13 @@ pub fn spawn_aggregation_task(pool: PgPool) {
 
             if let Err(err) = run_custom_metrics_aggregation(&pool).await {
                 tracing::error!(error = ?err, "aggregation: custom metrics aggregation failed");
+            }
+
+            // Daily contract health score update (runs at 2 AM UTC)
+            if chrono::Utc::now().hour() == 2 {
+                if let Err(err) = crate::health::update_all_health_scores(&pool).await {
+                    tracing::error!(error = ?err, "aggregation: health score update failed");
+                }
             }
         }
     });

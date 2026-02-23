@@ -24,6 +24,8 @@ pub struct Contract {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     #[serde(default)]
+    pub health_score: i32,
+    #[serde(default)]
     pub is_maintenance: bool,
     /// Groups rows that represent the same logical contract across networks (Issue #43)
     #[serde(default)]

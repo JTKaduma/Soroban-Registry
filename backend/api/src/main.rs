@@ -10,7 +10,10 @@ mod dependency;
 mod deprecation_handlers;
 mod error;
 mod handlers;
+mod health;
 pub mod health_monitor;
+#[cfg(test)]
+mod health_tests;
 mod metrics;
 mod metrics_handler;
 mod rate_limit;
