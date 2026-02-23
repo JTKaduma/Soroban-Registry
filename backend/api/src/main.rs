@@ -14,6 +14,7 @@ mod metrics_handler;
 mod metrics;
 // mod resource_handlers;
 // mod resource_tracking;
+mod dependency;
 mod analytics;
 mod custom_metrics_handlers;
 mod breaking_changes;

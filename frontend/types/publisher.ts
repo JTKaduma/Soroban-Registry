@@ -19,6 +19,7 @@ export interface ContractSummary {
   description: string
   verificationStatus: "verified" | "failed" | "pending"
   deployedAt: string
+  tags: string[]
 }
 
 export interface ActivityEvent {

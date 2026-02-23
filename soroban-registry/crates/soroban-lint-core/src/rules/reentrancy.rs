@@ -34,9 +34,21 @@ impl ReentrancyVisitor {
     }
 }
 
+/// Normalizes a tokenized string by stripping all whitespace so logically
+/// equivalent expressions compare the same.
+///
+/// For example, `storage() . persistent()` and `storage().persistent()`
+/// should be treated as identical. The `quote::quote!` macro tends to insert
+/// spaces around punctuation, which can interfere with simple substring
+/// checks like `.set(` or `invoke_contract`.
+fn normalize(s: &str) -> String {
+    s.chars().filter(|c| !c.is_whitespace()).collect()
+}
+
+
 impl<'ast> Visit<'ast> for ReentrancyVisitor {
     fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
-        let code_str = quote::quote!(#node).to_string();
+        let code_str = normalize(&quote::quote!(#node).to_string());
 
         // Check for cross-contract calls before state writes
         // Note: quote::quote! may add spaces around parens, so we search for multiple patterns

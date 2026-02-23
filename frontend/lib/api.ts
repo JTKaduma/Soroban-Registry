@@ -441,6 +441,7 @@ export const api = {
       queryParams.append("language", language),
     );
     if (params?.author) queryParams.append("author", params.author);
+    params?.tags?.forEach((tag) => queryParams.append("tag", tag));
     // Backend expects sort_by without underscores: createdat, updatedat, popularity, deployments, interactions, relevance
     if (params?.sort_by) {
       const backendSortBy =
@@ -976,6 +977,7 @@ export interface FormalVerificationPropertyResult {
 
 export interface FormalVerificationReport {
   session: FormalVerificationSession;
+
   properties: FormalVerificationPropertyResult[];
 }
 

@@ -44,6 +44,7 @@ pub fn contract_routes() -> Router<AppState> {
         .route("/api/contracts/:id/trust-score", get(handlers::get_trust_score))
         .route("/api/contracts/:id/dependencies", get(handlers::get_contract_dependencies))
         .route("/api/contracts/:id/dependents", get(handlers::get_contract_dependents))
+        .route("/api/contracts/:id/impact", get(handlers::get_impact_analysis))
         .route("/api/contracts/verify", post(handlers::verify_contract))
         .route(
             "/api/contracts/:id/performance",

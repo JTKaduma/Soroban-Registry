@@ -1115,7 +1115,23 @@ async fn main() -> Result<()> {
             compare,
             recommendations,
         } => {
-            println!("Profile command is temporarily disabled");
+            log::debug!(
+                "Command: profile | contract_path={} method={:?} output={:?} flamegraph={:?} compare={:?} recommendations={}",
+                contract_path,
+                method,
+                output,
+                flamegraph,
+                compare,
+                recommendations
+            );
+            commands::profile(
+                &contract_path,
+                method.as_deref(),
+                output.as_deref(),
+                flamegraph.as_deref(),
+                compare.as_deref(),
+                recommendations,
+            )?;
         }
         Commands::Test {
             test_file,

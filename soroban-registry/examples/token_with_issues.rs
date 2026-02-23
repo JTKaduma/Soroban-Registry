@@ -3,9 +3,14 @@
 use soroban_sdk::{contract, contractimpl, Env, Address, Symbol, symbol_short};
 
 const STORAGE_KEY_BALANCE: &str = "balance";  // Potential storage key collision
-const STORAGE_KEY_BALANCE: &str = "balance";  // Duplicate key
+// i removed const STORAGE_KEY_BALANCE: &str = "balance"; because the duplicate key was a compile error.
 
-#[contract]
+
+/// Maximum number of iterations allowed in the mint function.
+/// This prevents instruction budget exhaustion on the Stellar network.
+/// Soroban contracts are subject to strict CPU instruction limits per transaction.
+const MAX_MINT_ITERATIONS: u64 = 1_000;
+
 pub struct TokenContract;
 
 #[contractimpl]
@@ -67,16 +72,50 @@ impl TokenContract {
             .expect("No balance found")  // Issue: expect() in public function
     }
     
-    /// Mint new tokens with unbounded loop
-    pub fn mint(env: Env, amount: u64) {
-        let mut counter = 0;
+/// Mint new tokens up to a bounded iteration limit.
+///
+/// # Resource Limits
+///
+/// - Maximum iterations: `MAX_MINT_ITERATIONS` (1,000)
+/// - `amount` must be greater than 0
+/// - `amount` must not exceed `MAX_MINT_ITERATIONS`
+///
+/// These limits are intentionally enforced because Soroban contracts execute
+/// within a fixed CPU instruction budget per transaction. Allowing an
+/// unbounded loop could exhaust that budget, causing the transaction to fail
+/// or potentially opening the door to denial-of-service (DoS) scenarios.
+///
+/// By capping iterations and validating input early, we ensure predictable
+/// resource usage and safer execution.
+///
+/// # Panics
+///
+/// - Panics if `amount` is 0
+/// - Panics if `amount` exceeds `MAX_MINT_ITERATIONS`
+       pub fn mint(env: Env, amount: u64) {
+        // Parameter validation
+        if amount == 0 {
+            panic!("amount must be greater than zero");
+        }
+        if amount > MAX_MINT_ITERATIONS {
+            panic!(
+                "amount exceeds maximum allowed iterations ({})",
+                MAX_MINT_ITERATIONS
+            );
+        }
+
+        let mut counter: u64 = 0;
         loop {
+            // early exit when iteration limit is reached
+            if counter >= amount || counter >= MAX_MINT_ITERATIONS {
+                break;
+            }
+
             env.storage().persistent().set(
                 &Symbol::new(&env, "total_supply"),
                 &(amount as i128),
             );
             counter += 1;
-            // Issue: unbounded loop without explicit break
         }
     }
     
@@ -115,6 +154,8 @@ impl TokenContract {
     }
 }
 
+
+
 #[test]
 fn test_transfer() {
     let env = Env::new();
@@ -122,6 +163,36 @@ fn test_transfer() {
     // Test code can use unwrap - this should NOT trigger
     let val = Some(42).unwrap();
     assert_eq!(val, 42);
+}
+
+/// Verifies that minting with a valid amount completes successfully without panicking.
+#[test]
+fn test_mint_valid_amount() {
+    let env = Env::new();
+    // amount = 10, well within the MAX_MINT_ITERATIONS limit
+    TokenContract::mint(env, 10);
+}
+
+/// Verifies that minting with the exact MAX_MINT_ITERATIONS amount completes successfully without panicking.
+#[test]
+fn test_mint_exact_limit() {
+    let env = Env::new();
+    TokenContract::mint(env, MAX_MINT_ITERATIONS);
+}
+
+/// Mint with amount = 0 must panic (invalid input).
+#[test]
+#[should_panic(expected = "amount must be greater than zero")]
+fn test_mint_zero_amount() {
+    let env = Env::new();
+    TokenContract::mint(env, 0);
+}
+
+#[test]
+#[should_panic(expected = "amount exceeds maximum allowed iterations")]
+fn test_mint_exceeds_limit() {
+    let env = Env::new();
+    TokenContract::mint(env, MAX_MINT_ITERATIONS + 1);
 }
 
 #[test]
