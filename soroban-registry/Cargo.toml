@@ -5,6 +5,7 @@ members = [
     "crates/soroban-state-core",
     "crates/soroban-load-balancer",
     "crates/soroban-batch",
+    "crates/soroban-security-patch",
 ]
 resolver = "2"
 
