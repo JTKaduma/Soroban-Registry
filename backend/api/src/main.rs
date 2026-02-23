@@ -1,5 +1,8 @@
 #![allow(dead_code, unused)]
 
+mod routes;
+mod handlers;
+mod batch_verify_handlers;
 mod aggregation;
 mod error;
 mod handlers;
@@ -22,6 +25,7 @@ mod deprecation_handlers;
 pub mod health_monitor;
 mod deprecation_handlers;
 pub mod health_monitor;
+pub mod request_tracing;
 pub mod signing_handlers;
 mod type_safety;
 
@@ -45,14 +49,8 @@ async fn main() -> Result<()> {
     // Load environment variables
     dotenv().ok();
 
-    // Initialize tracing
-    tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "api=debug,tower_http=debug".into()),
-        )
-        .with(tracing_subscriber::fmt::layer())
-        .init();
+    // Initialize structured JSON tracing (ELK/Splunk compatible)
+    request_tracing::init_json_tracing();
 
     // Database connection
     let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
@@ -98,7 +96,7 @@ async fn main() -> Result<()> {
         .merge(routes::health_routes())
         .merge(routes::migration_routes())
         .fallback(handlers::route_not_found)
-        .layer(middleware::from_fn(request_logger))
+        .layer(middleware::from_fn(request_tracing::tracing_middleware))
         .layer(middleware::from_fn_with_state(
             rate_limit_state,
             rate_limit::rate_limit_middleware,
@@ -169,24 +167,4 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn request_logger(
-    req: axum::http::Request<axum::body::Body>,
-    next: axum::middleware::Next,
-) -> axum::response::Response {
-    let start = std::time::Instant::now();
-    let method = req.method().clone();
-    let uri = req.uri().clone();
 
-    let res = next.run(req).await;
-    let latency = start.elapsed();
-
-    tracing::debug!(
-        method = %method,
-        uri = %uri,
-        status = res.status().as_u16(),
-        latency = ?latency,
-        "request handled"
-    );
-
-    res
-}
