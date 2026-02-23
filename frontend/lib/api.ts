@@ -243,6 +243,7 @@ export const api = {
       queryParams.append("language", language),
     );
     if (params?.author) queryParams.append("author", params.author);
+    params?.tags?.forEach((tag) => queryParams.append("tag", tag));
     if (params?.sort_by) queryParams.append("sort_by", params.sort_by);
     if (params?.sort_order) queryParams.append("sort_order", params.sort_order);
     if (params?.page) queryParams.append("page", String(params.page));
@@ -614,6 +615,7 @@ export interface FormalVerificationPropertyResult {
 
 export interface FormalVerificationReport {
   session: FormalVerificationSession;
+
   properties: FormalVerificationPropertyResult[];
 }
 

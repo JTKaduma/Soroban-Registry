@@ -1,5 +1,7 @@
 import React, { useState, useMemo } from "react";
 import { ContractSummary } from "@/types/publisher";
+import { Tag } from "@/types/tag";
+import TagAutocomplete from "@/components/tags/TagAutocomplete";
 import { Search, Filter, ArrowUpRight } from "lucide-react";
 import { VerificationBadge } from "./VerificationBadge";
 import Link from "next/link";
@@ -83,6 +85,22 @@ export function PublisherContractsList({ contracts }: PublisherContractsListProp
               <p className="text-sm text-gray-500 dark:text-gray-400 line-clamp-2 mb-4 h-10">
                 {contract.description}
               </p>
+              
+              {contract.tags && contract.tags.length > 0 && (
+                <div className="flex flex-wrap gap-2 mb-4">
+                  {contract.tags.slice(0, 3).map((tag) => (
+                    <span
+                      key={tag}
+                      className="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300"
+                    >
+                      {tag}
+                    </span>
+                  ))}
+                  {contract.tags.length > 3 && (
+                    <span className="text-xs text-gray-500 flex items-center">+{contract.tags.length - 3}</span>
+                  )}
+                </div>
+              )}
               
               <div className="flex items-center justify-between text-xs text-gray-400 pt-3 border-t border-gray-200 dark:border-gray-700">
                 <span>ID: {contract.id.substring(0, 8)}...</span>
