@@ -153,10 +153,7 @@ impl RolloutEngine {
     }
 
     /// Advance the rollout to the next stage.
-    pub fn advance_stage(
-        &mut self,
-        patch_id: &str,
-    ) -> Result<RolloutStage, SecurityPatchError> {
+    pub fn advance_stage(&mut self, patch_id: &str) -> Result<RolloutStage, SecurityPatchError> {
         let state = self.get_rollout_mut(patch_id)?;
 
         // Check failure rate of current stage before advancing.
@@ -213,20 +210,14 @@ impl RolloutEngine {
     }
 
     /// Manually approve advancement (un-pause).
-    pub fn approve_stage(
-        &mut self,
-        patch_id: &str,
-    ) -> Result<(), SecurityPatchError> {
+    pub fn approve_stage(&mut self, patch_id: &str) -> Result<(), SecurityPatchError> {
         let state = self.get_rollout_mut(patch_id)?;
         state.paused = false;
         Ok(())
     }
 
     /// Roll back an in-progress rollout.
-    pub fn rollback(
-        &mut self,
-        patch_id: &str,
-    ) -> Result<(), SecurityPatchError> {
+    pub fn rollback(&mut self, patch_id: &str) -> Result<(), SecurityPatchError> {
         let state = self.get_rollout_mut(patch_id)?;
         state.completed = true;
         state.paused = false;
@@ -234,10 +225,7 @@ impl RolloutEngine {
     }
 
     /// Get the current rollout state for a patch.
-    pub fn get_rollout(
-        &self,
-        patch_id: &str,
-    ) -> Result<&RolloutState, SecurityPatchError> {
+    pub fn get_rollout(&self, patch_id: &str) -> Result<&RolloutState, SecurityPatchError> {
         self.rollouts
             .iter()
             .find(|r| r.patch_id == patch_id)
@@ -266,10 +254,7 @@ impl RolloutEngine {
 
     // ----- Private helpers -------------------------------------------------
 
-    fn get_rollout_mut(
-        &mut self,
-        patch_id: &str,
-    ) -> Result<&mut RolloutState, SecurityPatchError> {
+    fn get_rollout_mut(&mut self, patch_id: &str) -> Result<&mut RolloutState, SecurityPatchError> {
         self.rollouts
             .iter_mut()
             .find(|r| r.patch_id == patch_id)
@@ -277,15 +262,12 @@ impl RolloutEngine {
     }
 
     /// Partition contracts into rollout stages based on the plan's percentages.
-    fn partition_contracts(
-        contracts: &[String],
-        plan: &RolloutPlan,
-    ) -> StageAssignments {
+    fn partition_contracts(contracts: &[String], plan: &RolloutPlan) -> StageAssignments {
         let total = contracts.len();
         let canary_count =
             ((total as f64) * (plan.canary_percentage as f64 / 100.0)).ceil() as usize;
-        let early_count = ((total as f64) * (plan.early_adopter_percentage as f64 / 100.0)).ceil()
-            as usize;
+        let early_count =
+            ((total as f64) * (plan.early_adopter_percentage as f64 / 100.0)).ceil() as usize;
 
         // Clamp so we don't exceed total.
         let canary_count = canary_count.min(total);

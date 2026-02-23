@@ -47,7 +47,7 @@ impl VersionManager {
         let is_major = version.major > 0
             && self
                 .latest_version(patch_id)
-                .map_or(true, |prev| version.major > prev.major);
+                .is_none_or(|prev| version.major > prev.major);
 
         let record = VersionRecord {
             patch_id: patch_id.to_string(),
@@ -72,10 +72,7 @@ impl VersionManager {
         severity: Severity,
         release_notes: Option<String>,
     ) -> &VersionRecord {
-        let current = self
-            .latest_version(patch_id)
-            .cloned()
-            .unwrap_or_default();
+        let current = self.latest_version(patch_id).cloned().unwrap_or_default();
 
         let next = match severity {
             Severity::Critical | Severity::High => current.bump_major(),

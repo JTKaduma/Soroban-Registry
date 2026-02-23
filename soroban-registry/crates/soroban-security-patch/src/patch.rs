@@ -72,6 +72,7 @@ impl PatchManager {
     ///
     /// The patch is created in `Draft` status. The `payload_hash` is computed
     /// automatically from the supplied `payload`.
+    #[allow(clippy::too_many_arguments)]
     pub fn create_patch(
         &mut self,
         title: String,
@@ -258,10 +259,7 @@ impl PatchManager {
     // ----- Helpers (private) -----------------------------------------------
 
     /// Assert that a status transition is valid.
-    fn assert_transition(
-        from: &PatchStatus,
-        to: &PatchStatus,
-    ) -> Result<(), SecurityPatchError> {
+    fn assert_transition(from: &PatchStatus, to: &PatchStatus) -> Result<(), SecurityPatchError> {
         let valid = matches!(
             (from, to),
             (PatchStatus::Draft, PatchStatus::Validating)

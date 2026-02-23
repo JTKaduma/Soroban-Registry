@@ -72,10 +72,7 @@ impl DistributionManager {
     }
 
     /// Acknowledge a notification on behalf of the contract owner.
-    pub fn acknowledge(
-        &mut self,
-        notification_id: &str,
-    ) -> Result<(), SecurityPatchError> {
+    pub fn acknowledge(&mut self, notification_id: &str) -> Result<(), SecurityPatchError> {
         let record = self
             .notifications
             .iter_mut()
@@ -92,10 +89,7 @@ impl DistributionManager {
     }
 
     /// Retry failed notifications for a given patch.
-    pub fn retry_failed(
-        &mut self,
-        patch_id: &str,
-    ) -> Vec<String> {
+    pub fn retry_failed(&mut self, patch_id: &str) -> Vec<String> {
         let mut retried = Vec::new();
 
         for record in self.notifications.iter_mut() {

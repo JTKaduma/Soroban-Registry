@@ -67,11 +67,7 @@ impl AuditTrail {
     }
 
     /// Check whether a specific patch has been applied to a specific contract.
-    pub fn is_patch_applied(
-        &self,
-        patch_id: &str,
-        contract_id: &str,
-    ) -> bool {
+    pub fn is_patch_applied(&self, patch_id: &str, contract_id: &str) -> bool {
         self.entries.iter().any(|e| {
             e.patch_id == patch_id
                 && e.contract_id.as_deref() == Some(contract_id)
