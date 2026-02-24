@@ -1674,3 +1674,130 @@ pub struct CreateBackupRequest {
 pub struct RestoreBackupRequest {
     pub backup_date: String,
 }
+
+/// AUTOMATED REALEASE NOTE GENERATOR
+/// Status of auto-generated release notes (draft allows editing before publish)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, sqlx::Type)]
+#[sqlx(type_name = "release_notes_status", rename_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
+pub enum ReleaseNotesStatus {
+    Draft,
+    Published,
+}
+
+impl std::fmt::Display for ReleaseNotesStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ReleaseNotesStatus::Draft => write!(f, "draft"),
+            ReleaseNotesStatus::Published => write!(f, "published"),
+        }
+    }
+}
+
+/// A detected function change in a code diff
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FunctionChange {
+    pub name: String,
+    pub change_type: String, // "added", "removed", "modified"
+    pub old_signature: Option<String>,
+    pub new_signature: Option<String>,
+    pub is_breaking: bool,
+}
+
+/// Summary of a code diff between two contract versions
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiffSummary {
+    pub files_changed: i32,
+    pub lines_added: i32,
+    pub lines_removed: i32,
+    pub function_changes: Vec<FunctionChange>,
+    pub has_breaking_changes: bool,
+    /// Category counts: features, fixes, breaking
+    pub features_count: i32,
+    pub fixes_count: i32,
+    pub breaking_count: i32,
+}
+
+impl Default for DiffSummary {
+    fn default() -> Self {
+        Self {
+            files_changed: 0,
+            lines_added: 0,
+            lines_removed: 0,
+            function_changes: Vec::new(),
+            has_breaking_changes: false,
+            features_count: 0,
+            fixes_count: 0,
+            breaking_count: 0,
+        }
+    }
+}
+
+/// Stored release notes generation record
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct ReleaseNotesGenerated {
+    pub id: Uuid,
+    pub contract_id: Uuid,
+    pub version: String,
+    pub previous_version: Option<String>,
+    pub diff_summary: serde_json::Value,
+    pub changelog_entry: Option<String>,
+    pub notes_text: String,
+    pub status: ReleaseNotesStatus,
+    pub generated_by: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub published_at: Option<DateTime<Utc>>,
+}
+
+/// Request to auto-generate release notes for a contract version
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GenerateReleaseNotesRequest {
+    /// The version to generate notes for (must already exist in contract_versions)
+    pub version: String,
+    /// Optional explicit previous version to diff against.
+    /// If omitted, the latest version before `version` is used automatically.
+    pub previous_version: Option<String>,
+    /// URL to the source repository (used for git diff)
+    pub source_url: Option<String>,
+    /// Optional raw CHANGELOG.md content to parse
+    pub changelog_content: Option<String>,
+    /// Contract address to include in the notes
+    pub contract_address: Option<String>,
+}
+
+/// Request to manually edit release notes before publishing
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateReleaseNotesRequest {
+    /// Edited release notes text
+    pub notes_text: String,
+}
+
+/// Request to publish (finalize) release notes
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PublishReleaseNotesRequest {
+    /// If true, also update the `release_notes` column on `contract_versions`
+    #[serde(default = "default_true")]
+    pub update_version_record: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// Full response for generated release notes
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReleaseNotesResponse {
+    pub id: Uuid,
+    pub contract_id: Uuid,
+    pub version: String,
+    pub previous_version: Option<String>,
+    pub diff_summary: DiffSummary,
+    pub changelog_entry: Option<String>,
+    pub notes_text: String,
+    pub status: ReleaseNotesStatus,
+    pub generated_by: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub published_at: Option<DateTime<Utc>>,
+}
