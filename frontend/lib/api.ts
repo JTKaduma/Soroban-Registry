@@ -1013,6 +1013,52 @@ export const api = {
           body: JSON.stringify(req ?? { update_version_record: true }),
         }),
       `/api/contracts/${id}/release-notes/${version}/publish`
+  // Database Migration Versioning (Issue #252)
+  async getMigrationStatus(): Promise<MigrationStatusResponse> {
+    return handleApiCall<MigrationStatusResponse>(
+      () => fetch(`${API_URL}/api/admin/migrations/status`),
+      '/api/admin/migrations/status'
+    );
+  },
+
+  async registerMigration(data: RegisterMigrationRequest): Promise<RegisterMigrationResponse> {
+    return handleApiCall<RegisterMigrationResponse>(
+      () => fetch(`${API_URL}/api/admin/migrations/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      }),
+      '/api/admin/migrations/register'
+    );
+  },
+
+  async validateMigrations(): Promise<MigrationValidationResponse> {
+    return handleApiCall<MigrationValidationResponse>(
+      () => fetch(`${API_URL}/api/admin/migrations/validate`),
+      '/api/admin/migrations/validate'
+    );
+  },
+
+  async getMigrationLockStatus(): Promise<LockStatusResponse> {
+    return handleApiCall<LockStatusResponse>(
+      () => fetch(`${API_URL}/api/admin/migrations/lock`),
+      '/api/admin/migrations/lock'
+    );
+  },
+
+  async getMigrationVersion(version: number): Promise<SchemaVersion> {
+    return handleApiCall<SchemaVersion>(
+      () => fetch(`${API_URL}/api/admin/migrations/${version}`),
+      `/api/admin/migrations/${version}`
+    );
+  },
+
+  async rollbackMigration(version: number): Promise<RollbackResponse> {
+    return handleApiCall<RollbackResponse>(
+      () => fetch(`${API_URL}/api/admin/migrations/${version}/rollback`, {
+        method: 'POST',
+      }),
+      `/api/admin/migrations/${version}/rollback`
     );
   },
 };
@@ -1179,6 +1225,71 @@ export interface CompatibilityDashboardResponse {
   overall_incompatible: number;
   sdk_versions: string[];
   recent_changes: CompatibilityHistoryEntry[];
+}
+
+// ─── Database Migration Versioning (Issue #252) ──────────────────────────────
+
+export interface SchemaVersion {
+  id: number;
+  version: number;
+  description: string;
+  filename: string;
+  checksum: string;
+  applied_at: string;
+  applied_by: string;
+  execution_time_ms?: number;
+  rolled_back_at?: string;
+  rollback_by?: string;
+}
+
+export interface MigrationStatusResponse {
+  current_version?: number;
+  total_applied: number;
+  total_rolled_back: number;
+  pending_count: number;
+  versions: SchemaVersion[];
+  has_lock: boolean;
+  healthy: boolean;
+  warnings: string[];
+}
+
+export interface ChecksumMismatch {
+  version: number;
+  filename: string;
+  expected_checksum: string;
+  actual_checksum: string;
+}
+
+export interface MigrationValidationResponse {
+  valid: boolean;
+  mismatches: ChecksumMismatch[];
+  missing: number[];
+}
+
+export interface RegisterMigrationRequest {
+  version: number;
+  description: string;
+  filename: string;
+  sql_content: string;
+  down_sql?: string;
+}
+
+export interface RegisterMigrationResponse {
+  version: number;
+  checksum: string;
+  message: string;
+}
+
+export interface RollbackResponse {
+  version: number;
+  rolled_back_at: string;
+  message: string;
+}
+
+export interface LockStatusResponse {
+  locked: boolean;
+  locked_by?: string;
+  locked_at?: string;
 }
 
 // ─── Formal Verification ─────────────────────────────────────────────────────

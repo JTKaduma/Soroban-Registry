@@ -6,6 +6,7 @@ mod breaking_changes;
 mod cache;
 mod compatibility_testing_handlers;
 mod custom_metrics_handlers;
+mod migration_handlers;
 mod dependency;
 mod deprecation_handlers;
 mod error;
@@ -67,6 +68,9 @@ async fn main() -> Result<()> {
         .await?;
 
     tracing::info!("Database connected and migrations applied");
+
+    // Check migration versioning state on startup (Issue #252)
+    migration_handlers::check_migrations_on_startup(&pool).await;
 
     // Spawn the hourly analytics aggregation background task
     aggregation::spawn_aggregation_task(pool.clone());

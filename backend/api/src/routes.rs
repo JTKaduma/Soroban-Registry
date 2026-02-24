@@ -5,7 +5,7 @@ use axum::{
 
 use crate::{
     breaking_changes, compatibility_testing_handlers, custom_metrics_handlers,
-    deprecation_handlers, handlers, metrics_handler, state::AppState,
+    deprecation_handlers, handlers, metrics_handler, migration_handlers, state::AppState,
 };
 
 pub fn observability_routes() -> Router<AppState> {
@@ -175,6 +175,31 @@ pub fn health_routes() -> Router<AppState> {
 
 pub fn migration_routes() -> Router<AppState> {
     Router::new()
+        // Database Migration Versioning and Rollback (Issue #252)
+        .route(
+            "/api/admin/migrations/status",
+            get(migration_handlers::get_migration_status),
+        )
+        .route(
+            "/api/admin/migrations/register",
+            post(migration_handlers::register_migration),
+        )
+        .route(
+            "/api/admin/migrations/validate",
+            get(migration_handlers::validate_migrations),
+        )
+        .route(
+            "/api/admin/migrations/lock",
+            get(migration_handlers::get_lock_status),
+        )
+        .route(
+            "/api/admin/migrations/:version",
+            get(migration_handlers::get_migration_version),
+        )
+        .route(
+            "/api/admin/migrations/:version/rollback",
+            post(migration_handlers::rollback_migration),
+        )
 }
 
 pub fn compatibility_dashboard_routes() -> Router<AppState> {
