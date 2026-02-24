@@ -4,11 +4,12 @@ mod aggregation;
 mod analytics;
 mod breaking_changes;
 mod cache;
-mod db_monitoring;
 mod compatibility_testing_handlers;
+mod db_monitoring;
 
+mod activity_feed_handlers;
+mod activity_feed_routes;
 mod custom_metrics_handlers;
-mod migration_handlers;
 mod dependency;
 mod deprecation_handlers;
 mod error;
@@ -19,11 +20,12 @@ pub mod health_monitor;
 mod health_tests;
 mod metrics;
 mod metrics_handler;
+mod migration_handlers;
 mod rate_limit;
-pub mod request_tracing;
-mod routes;
 mod release_notes_handlers;
 mod release_notes_routes;
+pub mod request_tracing;
+mod routes;
 pub mod signing_handlers;
 mod state;
 mod type_safety;
@@ -58,11 +60,11 @@ async fn main() -> Result<()> {
 
     // Database connection with dynamic pool size
     let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
-    
+
     let logical_cores = std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(4);
-    
+
     let default_max_pool = (logical_cores * 2).max(10);
     let max_pool_size = std::env::var("DB_MAX_POOL_SIZE")
         .ok()
@@ -86,7 +88,6 @@ async fn main() -> Result<()> {
         .run(&pool)
         .await?;
 
-
     tracing::info!("Database connected and migrations applied");
 
     // Check migration versioning state on startup (Issue #252)
@@ -107,7 +108,7 @@ async fn main() -> Result<()> {
 
     // Spawn the background DB and cache monitoring task
     db_monitoring::spawn_db_monitoring_task(pool.clone(), state.cache.clone());
-    
+
     // Warm up the cache
     state.cache.clone().warm_up(pool.clone());
 
@@ -129,6 +130,7 @@ async fn main() -> Result<()> {
         .merge(routes::migration_routes())
         .merge(routes::compatibility_dashboard_routes())
         .merge(release_notes_routes::release_notes_routes())
+        .nest("/api", activity_feed_routes::routes())
         .fallback(handlers::route_not_found)
         .layer(middleware::from_fn(request_tracing::tracing_middleware))
         .layer(middleware::from_fn_with_state(
@@ -200,5 +202,3 @@ async fn main() -> Result<()> {
 
     Ok(())
 }
-
-

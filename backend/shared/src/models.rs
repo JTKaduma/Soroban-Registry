@@ -990,6 +990,8 @@ pub enum AnalyticsEventType {
     ContractVerified,
     ContractDeployed,
     VersionCreated,
+    ContractUpdated,
+    PublisherCreated,
 }
 
 impl std::fmt::Display for AnalyticsEventType {
@@ -999,8 +1001,25 @@ impl std::fmt::Display for AnalyticsEventType {
             Self::ContractVerified => write!(f, "contract_verified"),
             Self::ContractDeployed => write!(f, "contract_deployed"),
             Self::VersionCreated => write!(f, "version_created"),
+            Self::ContractUpdated => write!(f, "contract_updated"),
+            Self::PublisherCreated => write!(f, "publisher_created"),
         }
     }
+}
+
+/// A simplified entry for the activity feed API
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct ActivityFeedEntry {
+    pub id: Uuid,
+    pub event_type: AnalyticsEventType,
+    pub contract_id: Option<Uuid>,
+    pub contract_name: Option<String>,
+    pub contract_stellar_id: Option<String>,
+    pub publisher_id: Option<Uuid>,
+    pub publisher_name: Option<String>,
+    pub network: Option<Network>,
+    pub metadata: serde_json::Value,
+    pub created_at: DateTime<Utc>,
 }
 
 /// A raw analytics event recorded when a contract lifecycle action occurs
