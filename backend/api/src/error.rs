@@ -14,6 +14,12 @@ pub struct ApiError {
     message: String,
 }
 
+impl std::fmt::Display for ApiError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.error, self.message)
+    }
+}
+
 #[derive(Debug, Serialize)]
 struct ErrorResponse {
     error: String,

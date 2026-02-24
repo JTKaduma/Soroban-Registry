@@ -134,6 +134,17 @@ pub static DB_QUERY_ERRORS: Lazy<IntCounter> = counter!("db_query_errors_total",
 pub static DB_TRANSACTIONS_TOTAL: Lazy<IntCounter> =
     counter!("db_transactions_total", "Total DB transactions");
 pub static DB_POOL_SIZE: Lazy<IntGauge> = gauge!("db_pool_size", "DB connection pool size");
+pub static DB_CONNECTION_WAIT_MS: Lazy<HistogramVec> = Lazy::new(|| {
+    HistogramVec::new(
+        HistogramOpts::new("db_connection_wait_milliseconds", "DB connection acquisition latency")
+            .buckets(vec![1.0, 5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0]),
+        &["pool"],
+    )
+    .unwrap()
+});
+pub static DB_POOL_TIMEOUTS: Lazy<IntCounter> = counter!("db_pool_timeouts_total", "DB pool acquisition timeouts");
+pub static DB_POOL_UTILIZATION: Lazy<GaugeVec> = gauge_f64_vec!("db_pool_utilization", "DB pool utilization ratio", &["pool"]);
+
 
 // ── Cache ───────────────────────────────────────────────────────────────────
 pub static CACHE_HITS: Lazy<IntCounter> = counter!("cache_hits_total", "Cache hits");
@@ -258,6 +269,10 @@ pub fn register_all(r: &Registry) -> prometheus::Result<()> {
     r.register(Box::new(DB_QUERY_ERRORS.clone()))?;
     r.register(Box::new(DB_TRANSACTIONS_TOTAL.clone()))?;
     r.register(Box::new(DB_POOL_SIZE.clone()))?;
+    r.register(Box::new(DB_CONNECTION_WAIT_MS.clone()))?;
+    r.register(Box::new(DB_POOL_TIMEOUTS.clone()))?;
+    r.register(Box::new(DB_POOL_UTILIZATION.clone()))?;
+
     r.register(Box::new(CACHE_HITS.clone()))?;
     r.register(Box::new(CACHE_MISSES.clone()))?;
     r.register(Box::new(CACHE_EVICTIONS.clone()))?;

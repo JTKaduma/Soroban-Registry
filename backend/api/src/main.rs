@@ -4,7 +4,9 @@ mod aggregation;
 mod analytics;
 mod breaking_changes;
 mod cache;
+mod db_monitoring;
 mod compatibility_testing_handlers;
+
 mod custom_metrics_handlers;
 mod migration_handlers;
 mod dependency;
@@ -54,11 +56,28 @@ async fn main() -> Result<()> {
     // Initialize structured JSON tracing (ELK/Splunk compatible)
     request_tracing::init_json_tracing();
 
-    // Database connection
+    // Database connection with dynamic pool size
     let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    
+    let logical_cores = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4);
+    
+    let default_max_pool = (logical_cores * 2).max(10);
+    let max_pool_size = std::env::var("DB_MAX_POOL_SIZE")
+        .ok()
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(default_max_pool as u32);
+
+    tracing::info!(
+        max_pool_size = max_pool_size,
+        logical_cores = logical_cores,
+        "Initializing database connection pool"
+    );
 
     let pool = PgPoolOptions::new()
-        .max_connections(5)
+        .max_connections(max_pool_size)
+        .acquire_timeout(std::time::Duration::from_secs(30))
         .connect(&database_url)
         .await?;
 
@@ -66,6 +85,7 @@ async fn main() -> Result<()> {
     sqlx::migrate!("../../database/migrations")
         .run(&pool)
         .await?;
+
 
     tracing::info!("Database connected and migrations applied");
 
@@ -84,6 +104,9 @@ async fn main() -> Result<()> {
     // Create app state
     let is_shutting_down = Arc::new(AtomicBool::new(false));
     let state = AppState::new(pool.clone(), registry, is_shutting_down.clone());
+
+    // Spawn the background DB and cache monitoring task
+    db_monitoring::spawn_db_monitoring_task(pool.clone(), state.cache.clone());
     
     // Warm up the cache
     state.cache.clone().warm_up(pool.clone());
