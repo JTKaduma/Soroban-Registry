@@ -35,17 +35,34 @@ mod validation;
 // mod resource_handlers;
 // mod resource_tracking;
 
+
 use anyhow::Result;
-use axum::http::{header, HeaderValue, Method};
+use axum::extract::{Request, State};
+use axum::http::{header, HeaderValue, Method, StatusCode};
+use axum::response::Response;
 use axum::{middleware, Router};
 use dotenv::dotenv;
 use prometheus::Registry;
 use sqlx::postgres::PgPoolOptions;
 use std::net::SocketAddr;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tower_http::cors::CorsLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+async fn track_in_flight_middleware(
+    State(state): State<AppState>,
+    req: Request,
+    next: middleware::Next,
+) -> Result<Response, StatusCode> {
+    if state.is_shutting_down.load(Ordering::Relaxed) {
+        return Err(StatusCode::SERVICE_UNAVAILABLE);
+    }
+    crate::metrics::HTTP_IN_FLIGHT.inc();
+    let res = next.run(req).await;
+    crate::metrics::HTTP_IN_FLIGHT.dec();
+    Ok(res)
+}
 
 use crate::rate_limit::RateLimitState;
 use crate::state::AppState;
@@ -147,18 +164,22 @@ async fn main() -> Result<()> {
         .fallback(handlers::route_not_found)
         .layer(middleware::from_fn(request_tracing::tracing_middleware))
         .layer(middleware::from_fn_with_state(
+            state.clone(),
+            track_in_flight_middleware,
+        ))
+        .layer(middleware::from_fn_with_state(
             rate_limit_state,
             rate_limit::rate_limit_middleware,
         ))
         .layer(cors)
-        .with_state(state);
+        .with_state(state.clone());
 
     // Start server
     let addr = SocketAddr::from(([0, 0, 0, 0], 3001));
     tracing::info!("API server listening on {}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<()>(1);
 
     let server = axum::serve(
         listener,
@@ -187,30 +208,71 @@ async fn main() -> Result<()> {
             _ = terminate => {},
         }
 
-        tracing::info!(
-            "SIGTERM/SIGINT received. Failing health checks and stopping new requests..."
-        );
-        is_shutting_down.store(true, std::sync::atomic::Ordering::SeqCst);
-        let _ = tx.send(());
+        tracing::info!("SIGTERM/SIGINT received. Failing health checks and stopping new requests...");
+        let _ = tx.send(()).await;
     });
 
-    tokio::select! {
-        res = server => {
-            if let Err(e) = res {
-                tracing::error!("Server error: {}", e);
-            }
+    let server_task = tokio::spawn(async move {
+        if let Err(e) = server.await {
+            tracing::error!("Server error: {}", e);
         }
-        _ = async {
-            let _ = rx.await;
-            tracing::info!("Draining active requests (timeout: 30s)...");
-            tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
-            tracing::warn!("Drain timeout reached. Forcing shutdown...");
-        } => {}
-    }
+    });
 
-    tracing::info!("Closing database connections...");
-    pool.close().await;
-    tracing::info!("Shutdown complete");
+    if let Some(()) = rx.recv().await {
+        is_shutting_down.store(true, Ordering::SeqCst);
+        let initial_in_flight = crate::metrics::HTTP_IN_FLIGHT.get();
+        tracing::info!("Graceful shutdown initiated. In-flight requests: {}", initial_in_flight);
+
+        let timeout_secs = std::env::var("SHUTDOWN_TIMEOUT")
+            .unwrap_or_else(|_| "30".to_string())
+            .parse::<u64>()
+            .unwrap_or(30);
+
+        let start_time = std::time::Instant::now();
+        let timeout_duration = std::time::Duration::from_secs(timeout_secs);
+        
+        let mut success = false;
+        loop {
+            let in_flight = crate::metrics::HTTP_IN_FLIGHT.get();
+            if in_flight == 0 {
+                tracing::info!(
+                    "All in-flight requests completed in {}ms. In-flight: 0",
+                    start_time.elapsed().as_millis()
+                );
+                success = true;
+                break;
+            }
+            if start_time.elapsed() > timeout_duration {
+                tracing::error!(
+                    "Graceful shutdown timeout ({}s) reached. {} requests still in-flight.",
+                    timeout_secs,
+                    in_flight
+                );
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+
+        tracing::info!("Closing database connections cleanly...");
+        pool.close().await;
+        
+        let shutdown_duration = start_time.elapsed();
+        tracing::info!(
+            "Shutdown complete. Duration: {}ms",
+            shutdown_duration.as_millis()
+        );
+
+        if success {
+            std::process::exit(0);
+        } else {
+            std::process::exit(1);
+        }
+    } else {
+        let _ = server_task.await;
+        tracing::info!("Closing database connections cleanly...");
+        pool.close().await;
+        tracing::info!("Shutdown complete");
+    }
 
     Ok(())
 }

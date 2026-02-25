@@ -52,6 +52,15 @@ pub fn contract_routes() -> Router<AppState> {
             get(handlers::get_contract_versions).post(handlers::create_contract_version),
         )
         .route(
+            "/api/contracts/:id/changelog",
+            get(handlers::get_contract_changelog),
+        )
+        // Compatibility alias (spec asks for /contracts/{id}/changelog)
+        .route(
+            "/contracts/:id/changelog",
+            get(handlers::get_contract_changelog),
+        )
+        .route(
             "/api/contracts/breaking-changes",
             get(breaking_changes::get_breaking_changes),
         )

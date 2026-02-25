@@ -564,6 +564,76 @@ pub async fn get_contract_versions(
     Ok(Json(versions))
 }
 
+/// GET /api/contracts/:id/changelog (and /contracts/:id/changelog) — release history with breaking-change markers.
+pub async fn get_contract_changelog(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<ContractChangelogResponse>> {
+    let (contract_uuid, contract_id) = fetch_contract_identity(&state, &id).await?;
+
+    // Ascending order makes it easy to compute diffs against the previous version.
+    let versions: Vec<ContractVersion> = sqlx::query_as(
+        "SELECT * FROM contract_versions WHERE contract_id = $1 ORDER BY created_at ASC",
+    )
+    .bind(contract_uuid)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|err| db_internal_error("get contract versions for changelog", err))?;
+
+    let mut entries: Vec<ContractChangelogEntry> = Vec::with_capacity(versions.len());
+
+    let mut prev_version: Option<String> = None;
+    for v in &versions {
+        let mut breaking = false;
+        let mut breaking_changes: Vec<String> = Vec::new();
+
+        if let Some(prev) = prev_version.as_deref() {
+            let old_selector = format!("{}@{}", contract_id, prev);
+            let new_selector = format!("{}@{}", contract_id, v.version);
+
+            let old_abi = resolve_abi(&state, &old_selector).await?;
+            let new_abi = resolve_abi(&state, &new_selector).await?;
+
+            let old_spec = crate::type_safety::parser::parse_json_spec(&old_abi, &old_selector)
+                .map_err(|e| {
+                    ApiError::bad_request("InvalidABI", format!("Failed to parse old ABI: {}", e))
+                })?;
+            let new_spec = crate::type_safety::parser::parse_json_spec(&new_abi, &new_selector)
+                .map_err(|e| {
+                    ApiError::bad_request("InvalidABI", format!("Failed to parse new ABI: {}", e))
+                })?;
+
+            let changes = diff_abi(&old_spec, &new_spec);
+            breaking = has_breaking_changes(&changes);
+            breaking_changes = changes
+                .into_iter()
+                .filter(|c| c.severity == crate::breaking_changes::ChangeSeverity::Breaking)
+                .map(|c| c.message)
+                .collect();
+        }
+
+        entries.push(ContractChangelogEntry {
+            version: v.version.clone(),
+            created_at: v.created_at,
+            commit_hash: v.commit_hash.clone(),
+            source_url: v.source_url.clone(),
+            release_notes: v.release_notes.clone(),
+            breaking,
+            breaking_changes,
+        });
+
+        prev_version = Some(v.version.clone());
+    }
+
+    // Most APIs return newest-first for timelines.
+    entries.reverse();
+
+    Ok(Json(ContractChangelogResponse {
+        contract_id: contract_uuid,
+        entries,
+    }))
+}
+
 pub async fn create_contract_version(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -1477,7 +1547,7 @@ pub async fn verify_contract(
 
     let verification_id: Uuid = sqlx::query_scalar(
         "INSERT INTO verifications (contract_id, status, source_code, build_params, compiler_version, verified_at, error_message)
-         VALUES ($1, 'verified', $2, $3, $4, NOW(), NULL)
+         VALUES ($1, 'pending', $2, $3, $4, NULL, NULL)
          RETURNING id",
     )
     .bind(contract.id)
@@ -1488,48 +1558,73 @@ pub async fn verify_contract(
     .await
     .map_err(|err| db_internal_error("insert verification record", err))?;
 
-    sqlx::query("UPDATE contracts SET is_verified = true, updated_at = NOW() WHERE id = $1")
-        .bind(contract.id)
-        .execute(&state.db)
-        .await
-        .map_err(|err| db_internal_error("mark contract verified", err))?;
+    let verification_result = verifier::verify_contract(
+        &req.source_code,
+        &contract.wasm_hash,
+        Some(&req.compiler_version),
+        Some(&req.build_params),
+    )
+    .await;
 
     let ip_address = extract_ip_address(&headers);
-    let verification_changes = json!({
-        "verification_id": { "before": Value::Null, "after": verification_id },
-        "status": { "before": Value::Null, "after": "verified" },
-        "compiler_version": { "before": Value::Null, "after": req.compiler_version },
-        "verified_at": { "before": Value::Null, "after": chrono::Utc::now() }
-    });
-
-    write_contract_audit_log(
-        &state.db,
-        ContractAuditEventType::VerificationAdded,
-        contract.id,
-        contract.publisher_id,
-        verification_changes,
-        &ip_address,
-    )
-    .await
-    .map_err(|err| db_internal_error("write verification_added audit log", err))?;
-
     let before_status = previous_status.unwrap_or_else(|| "pending".to_string());
-    if before_status != "verified" {
-        let status_changes = json!({
-            "status": { "before": before_status, "after": "verified" },
-            "is_verified": { "before": contract.is_verified, "after": true }
-        });
-        write_contract_audit_log(
-            &state.db,
-            ContractAuditEventType::StatusChanged,
-            contract.id,
-            contract.publisher_id,
-            status_changes,
-            &ip_address,
-        )
-        .await
-        .map_err(|err| db_internal_error("write status_changed audit log", err))?;
-    }
+
+    match verification_result {
+        Ok(result) if result.verified => {
+            sqlx::query(
+                "UPDATE verifications
+                 SET status = 'verified', verified_at = NOW(), error_message = NULL
+                 WHERE id = $1",
+            )
+            .bind(verification_id)
+            .execute(&state.db)
+            .await
+            .map_err(|err| db_internal_error("mark verification as verified", err))?;
+
+            sqlx::query(
+                "UPDATE contracts SET is_verified = true, updated_at = NOW() WHERE id = $1",
+            )
+            .bind(contract.id)
+            .execute(&state.db)
+            .await
+            .map_err(|err| db_internal_error("mark contract verified", err))?;
+
+            let verification_changes = json!({
+                "verification_id": { "before": Value::Null, "after": verification_id },
+                "status": { "before": Value::Null, "after": "verified" },
+                "compiler_version": { "before": Value::Null, "after": req.compiler_version },
+                "verified_at": { "before": Value::Null, "after": chrono::Utc::now() },
+                "compiled_wasm_hash": { "before": Value::Null, "after": result.compiled_wasm_hash },
+                "deployed_wasm_hash": { "before": Value::Null, "after": result.deployed_wasm_hash }
+            });
+
+            write_contract_audit_log(
+                &state.db,
+                ContractAuditEventType::VerificationAdded,
+                contract.id,
+                contract.publisher_id,
+                verification_changes,
+                &ip_address,
+            )
+            .await
+            .map_err(|err| db_internal_error("write verification_added audit log", err))?;
+
+            if before_status != "verified" {
+                let status_changes = json!({
+                    "status": { "before": before_status, "after": "verified" },
+                    "is_verified": { "before": contract.is_verified, "after": true }
+                });
+                write_contract_audit_log(
+                    &state.db,
+                    ContractAuditEventType::StatusChanged,
+                    contract.id,
+                    contract.publisher_id,
+                    status_changes,
+                    &ip_address,
+                )
+                .await
+                .map_err(|err| db_internal_error("write status_changed audit log", err))?;
+            }
 
     record_contract_interaction(
         &state.db,
@@ -1556,12 +1651,139 @@ pub async fn verify_contract(
         Some(json!({ "verification_id": verification_id })),
     )
     .await;
+            let _ = analytics::record_event(
+                &state.db,
+                AnalyticsEventType::ContractVerified,
+                Some(contract.id),
+                Some(contract.publisher_id),
+                None,
+                Some(&contract.network),
+                Some(json!({ "verification_id": verification_id })),
+            )
+            .await;
 
-    Ok(Json(json!({
-        "verified": true,
-        "verification_id": verification_id,
-        "contract_id": contract.id
-    })))
+            Ok(Json(json!({
+                "verified": true,
+                "status": "verified",
+                "verification_id": verification_id,
+                "contract_id": contract.id,
+                "compiled_wasm_hash": result.compiled_wasm_hash,
+                "deployed_wasm_hash": result.deployed_wasm_hash
+            })))
+        }
+        Ok(result) => {
+            let failure_message = result
+                .message
+                .unwrap_or_else(|| "Verification failed due to bytecode mismatch".to_string());
+
+            sqlx::query(
+                "UPDATE verifications
+                 SET status = 'failed', verified_at = NULL, error_message = $2
+                 WHERE id = $1",
+            )
+            .bind(verification_id)
+            .bind(&failure_message)
+            .execute(&state.db)
+            .await
+            .map_err(|err| db_internal_error("mark verification as failed", err))?;
+
+            let verification_changes = json!({
+                "verification_id": { "before": Value::Null, "after": verification_id },
+                "status": { "before": Value::Null, "after": "failed" },
+                "compiler_version": { "before": Value::Null, "after": req.compiler_version },
+                "error_message": { "before": Value::Null, "after": failure_message },
+                "compiled_wasm_hash": { "before": Value::Null, "after": result.compiled_wasm_hash },
+                "deployed_wasm_hash": { "before": Value::Null, "after": result.deployed_wasm_hash }
+            });
+            write_contract_audit_log(
+                &state.db,
+                ContractAuditEventType::VerificationAdded,
+                contract.id,
+                contract.publisher_id,
+                verification_changes,
+                &ip_address,
+            )
+            .await
+            .map_err(|err| db_internal_error("write failed verification audit log", err))?;
+
+            if before_status != "failed" {
+                let status_changes = json!({
+                    "status": { "before": before_status, "after": "failed" },
+                    "is_verified": { "before": contract.is_verified, "after": contract.is_verified }
+                });
+                write_contract_audit_log(
+                    &state.db,
+                    ContractAuditEventType::StatusChanged,
+                    contract.id,
+                    contract.publisher_id,
+                    status_changes,
+                    &ip_address,
+                )
+                .await
+                .map_err(|err| db_internal_error("write failed status audit log", err))?;
+            }
+
+            Err(ApiError::unprocessable(
+                "VerificationFailed",
+                failure_message,
+            ))
+        }
+        Err(err) => {
+            let failure_message = err.to_string();
+
+            sqlx::query(
+                "UPDATE verifications
+                 SET status = 'failed', verified_at = NULL, error_message = $2
+                 WHERE id = $1",
+            )
+            .bind(verification_id)
+            .bind(&failure_message)
+            .execute(&state.db)
+            .await
+            .map_err(|db_err| db_internal_error("persist verifier error", db_err))?;
+
+            let verification_changes = json!({
+                "verification_id": { "before": Value::Null, "after": verification_id },
+                "status": { "before": Value::Null, "after": "failed" },
+                "compiler_version": { "before": Value::Null, "after": req.compiler_version },
+                "error_message": { "before": Value::Null, "after": failure_message }
+            });
+            write_contract_audit_log(
+                &state.db,
+                ContractAuditEventType::VerificationAdded,
+                contract.id,
+                contract.publisher_id,
+                verification_changes,
+                &ip_address,
+            )
+            .await
+            .map_err(|db_err| db_internal_error("write verifier error audit log", db_err))?;
+
+            if before_status != "failed" {
+                let status_changes = json!({
+                    "status": { "before": before_status, "after": "failed" },
+                    "is_verified": { "before": contract.is_verified, "after": contract.is_verified }
+                });
+                write_contract_audit_log(
+                    &state.db,
+                    ContractAuditEventType::StatusChanged,
+                    contract.id,
+                    contract.publisher_id,
+                    status_changes,
+                    &ip_address,
+                )
+                .await
+                .map_err(|db_err| {
+                    db_internal_error("write verifier error status audit log", db_err)
+                })?;
+            }
+
+            Err(ApiError::unprocessable(
+                "VerificationFailed",
+                failure_message,
+            ))
+        }
+    }
 }
 
 pub async fn update_contract_metadata(

@@ -4,6 +4,12 @@
 
 Contract verification proves that the source code you claim matches the bytecode deployed on the Stellar blockchain. This establishes trust by allowing users to audit the contract's behavior before interacting with it.
 
+Current implementation now enforces verification in the API path:
+- `POST /api/contracts/verify` creates a `pending` verification record first.
+- The backend verifier compiles submitted source to WASM, computes SHA-256 of the compiled bytes, and compares it to the deployed `contracts.wasm_hash`.
+- Verification rows are finalized as `verified` or `failed` with an `error_message` on failure.
+- `contracts.is_verified` is set to `true` only on successful verification.
+
 ## Verification Process Flow
 
 ```
@@ -125,28 +131,21 @@ Content-Type: application/json
 **Response (Success):**
 ```json
 {
+  "verified": true,
   "status": "verified",
   "verification_id": "ver_abc123",
-  "timestamp": "2026-02-24T12:34:56Z",
-  "bytecode_hash": "a3f2b8c9d1e4...",
-  "compiler_used": "soroban-sdk 21.0.0",
-  "build_reproducible": true
+  "contract_id": "f7da1d3a-31f2-40f8-9b6f-ec63fe4a60b7",
+  "compiled_wasm_hash": "a3f2b8c9d1e4...",
+  "deployed_wasm_hash": "a3f2b8c9d1e4..."
 }
 ```
 
 **Response (Failure):**
 ```json
 {
-  "status": "failed",
-  "verification_id": "ver_abc124",
-  "timestamp": "2026-02-24T12:35:12Z",
-  "error": {
-    "code": "BYTECODE_MISMATCH",
-    "message": "Compiled bytecode hash does not match on-chain hash",
-    "expected_hash": "a3f2b8c9d1e4...",
-    "actual_hash": "9f1a2b3c4d5e...",
-    "details": "Possible causes: wrong compiler version, optimization settings, or source code"
-  }
+  "error": "VerificationFailed",
+  "message": "Bytecode mismatch: compiled hash 9f1a2b3c4d5e... does not match deployed hash a3f2b8c9d1e4...",
+  "code": 422
 }
 ```
 

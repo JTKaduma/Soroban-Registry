@@ -192,6 +192,8 @@ CLI configuration is stored at `~/.soroban-registry/config.toml`. If a legacy `~
 - `GET /api/contracts/:id` - Get contract details
 - `POST /api/contracts` - Publish a new contract
 - `GET /api/contracts/:id/versions` - Get contract versions
+- `GET /api/contracts/:id/changelog` - Get contract release history with breaking-change markers
+- `GET /contracts/:id/changelog` - Compatibility alias for the changelog endpoint
 - `POST /api/contracts/verify` - Verify contract source
 
 ### Publishers
@@ -204,6 +206,45 @@ CLI configuration is stored at `~/.soroban-registry/config.toml`. If a legacy `~
 
 - `GET /api/stats` - Registry statistics
 - `GET /health` - Health check
+
+### Changelogs & Breaking Changes
+
+Soroban Registry automatically tracks **release history** for each contract and enforces **semantic versioning rules** when new versions are created.
+
+- **Version creation enforcement**  
+  - When `POST /api/contracts/:id/versions` is called, the registry:
+    - Loads the latest ABI for the previous version.
+    - Computes an ABI diff using the same engine behind `GET /api/contracts/breaking-changes`.
+    - **Rejects** the request with `422 BreakingChangeWithoutMajorBump` if any breaking changes are detected and the new version does not bump the **major** semver component.
+
+- **Changelog API**  
+  - `GET /api/contracts/:id/changelog` (and alias `GET /contracts/:id/changelog`) returns a structured changelog:
+
+  ```json
+  {
+    "contract_id": "1e8c0c4c-3c5e-4b0a-a1c2-9f2f5f3d7b10",
+    "entries": [
+      {
+        "version": "2.0.0",
+        "created_at": "2026-02-24T12:34:56Z",
+        "commit_hash": "abc1234",
+        "source_url": "https://github.com/org/repo/commit/abc1234",
+        "release_notes": "Major rewrite of the settlement engine.",
+        "breaking": true,
+        "breaking_changes": [
+          "Function 'settle' parameter 'amount' type changed from 'u64' to 'i128'",
+          "Enum 'SettlementState' variant 'Pending' was removed"
+        ]
+      }
+    ]
+  }
+  ```
+
+  - Entries are ordered **newest-first**.
+  - `breaking` is `true` if any ABI-breaking changes were detected compared to the previous version.
+  - `breaking_changes` contains human-readable descriptions derived from the ABI diff engine.
+
+This changelog API is designed to back both **UI release history views** and **automation/CI checks** that need to understand when a release contains breaking changes.
 
 ## Database
 

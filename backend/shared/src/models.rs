@@ -1883,3 +1883,28 @@ pub struct ReleaseNotesResponse {
     pub updated_at: DateTime<Utc>,
     pub published_at: Option<DateTime<Utc>>,
 }
+
+// ────────────────────────────────────────────────────────────────────────────
+// Contract changelog (release history)
+// ────────────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContractChangelogEntry {
+    pub version: String,
+    pub created_at: DateTime<Utc>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub commit_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub release_notes: Option<String>,
+    pub breaking: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub breaking_changes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContractChangelogResponse {
+    pub contract_id: Uuid,
+    pub entries: Vec<ContractChangelogEntry>,
+}
