@@ -78,6 +78,7 @@ async fn main() -> Result<()> {
     let is_shutting_down = Arc::new(AtomicBool::new(false));
     let state = AppState::new(pool.clone(), registry, is_shutting_down.clone());
     let rate_limit_state = RateLimitState::from_env();
+    rate_limit_state.spawn_eviction_task(); 
 
     let cors = CorsLayer::new()
         .allow_origin([
