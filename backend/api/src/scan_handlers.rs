@@ -13,7 +13,7 @@ pub async fn ingest_cves(
     State(state): State<AppState>,
     Json(payload): Json<Vec<VulnerabilityPayload>>,
 ) -> impl IntoResponse {
-    match scanner_service::sync_cves(&state.pool, payload).await {
+    match scanner_service::sync_cves(&state.db, payload).await {
         Ok(count) => {
             let msg = format!("Ingested {} CVEs successfully", count);
             (StatusCode::OK, Json(msg)).into_response()
@@ -30,7 +30,7 @@ pub async fn scan_contract(
     Path(contract_id): Path<Uuid>,
     Json(payload): Json<ScanRequest>,
 ) -> impl IntoResponse {
-    match scanner_service::perform_scan(&state.pool, contract_id, payload).await {
+    match scanner_service::perform_scan(&state.db, contract_id, payload).await {
         Ok(report) => (StatusCode::OK, Json(report)).into_response(),
         Err(e) => {
             let err = format!("Failed to run contract scan: {}", e);
@@ -43,7 +43,7 @@ pub async fn get_scan_report(
     State(state): State<AppState>,
     Path(contract_id): Path<Uuid>,
 ) -> impl IntoResponse {
-    match scanner_service::get_history(&state.pool, contract_id).await {
+    match scanner_service::get_history(&state.db, contract_id).await {
         Ok(report) => (StatusCode::OK, Json(report)).into_response(),
         Err(e) => {
             let err = format!("Failed to retrieve scan history: {}", e);
