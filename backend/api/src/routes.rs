@@ -1,12 +1,17 @@
 use axum::{
-    routing::{get, post, put},
+    routing::{get, post},
     Router,
 };
 
-use crate::{handlers, metrics_handler, resource_handlers, state::AppState};
-use crate::{auth_handlers, handlers, metrics_handler, resource_handlers, state::AppState};
-use crate::{compatibility_handlers, handlers, metrics_handler, state::AppState};
-use crate::{handlers, state::AppState};
+use crate::{
+    activity_feed_handlers,
+    compatibility_handlers,
+    handlers,
+    metrics_handler,
+    resource_handlers,
+    auth_handlers,
+    state::AppState,
+};
 
 pub fn observability_routes() -> Router<AppState> {
     Router::new()
@@ -56,6 +61,10 @@ pub fn health_routes() -> Router<AppState> {
     Router::new()
         .route("/health", get(handlers::health_check))
         .route("/api/stats", get(handlers::get_stats))
+        .route(
+            "/api/activity-feed",
+            get(activity_feed_handlers::get_activity_feed),
+        )
 }
 
 pub fn migration_routes() -> Router<AppState> {

@@ -966,6 +966,64 @@ pub struct AuditLogPage {
     pub total_pages: i64,
 }
 
+// ────────────────────────────────────────────────────────────────────────────
+// Cursor-based pagination  (issue #337)
+// Used by activity-feed and any future cursor-paginated endpoints.
+// PaginatedResponse (offset-based) above is left completely untouched.
+// ────────────────────────────────────────────────────────────────────────────
+
+/// Query parameters for the activity feed endpoint.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActivityFeedParams {
+    /// ISO-8601 timestamp. Only events older than this are returned.
+    /// Omit on the first request; use `next_cursor` from the previous
+    /// response on subsequent requests.
+    pub cursor: Option<DateTime<Utc>>,
+
+    /// How many events to return (default 20, max 100).
+    #[serde(default = "default_activity_limit")]
+    pub limit: i64,
+
+    /// Optionally filter by event type.
+    pub event_type: Option<AnalyticsEventType>,
+}
+
+fn default_activity_limit() -> i64 {
+    20
+}
+
+/// Response for cursor-paginated endpoints.
+/// `next_cursor` is `None` when `has_more` is false (last page).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CursorPaginatedResponse<T: Serialize> {
+    pub data: Vec<T>,
+    /// Real total matching the applied filters — from COUNT(*).
+    pub total: i64,
+    /// True when more results exist beyond this page.
+    pub has_more: bool,
+    /// Pass this value as `cursor` to fetch the next page.
+    /// `None` on the last page.
+    pub next_cursor: Option<DateTime<Utc>>,
+}
+
+impl<T: Serialize> CursorPaginatedResponse<T> {
+    pub fn new(
+        data: Vec<T>,
+        total: i64,
+        limit: i64,
+        next_cursor: Option<DateTime<Utc>>,
+    ) -> Self {
+        let has_more = data.len() as i64 == limit;
+        Self {
+            has_more,
+            // Only emit a cursor when there really are more pages.
+            next_cursor: if has_more { next_cursor } else { None },
+            data,
+            total,
+        }
+    }
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // Config Management types
 // ════════════════════════════════════════════════════════════════════════════
