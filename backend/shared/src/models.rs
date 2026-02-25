@@ -1760,24 +1760,54 @@ pub struct TransparencyLogQueryParams {
     pub offset: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type, PartialEq)]
-#[sqlx(type_name = "health_status", rename_all = "snake_case")]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub enum HealthStatus {
     Healthy,
     Warning,
     Critical,
 }
 
+impl std::fmt::Display for HealthStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Healthy => write!(f, "healthy"),
+            Self::Warning => write!(f, "warning"),
+            Self::Critical => write!(f, "critical"),
+        }
+    }
+}
+
+impl std::str::FromStr for HealthStatus {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "healthy" => Ok(Self::Healthy),
+            "warning" => Ok(Self::Warning),
+            "critical" => Ok(Self::Critical),
+            other => Err(format!("unknown health status: {}", other)),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct ContractHealth {
     pub contract_id: Uuid,
-    pub status: HealthStatus,
+    pub status: String,
     pub last_activity: DateTime<Utc>,
     pub security_score: i32,
     pub audit_date: Option<DateTime<Utc>>,
     pub total_score: i32,
     pub recommendations: Vec<String>,
     pub updated_at: DateTime<Utc>,
+}
+
+impl ContractHealth {
+    /// Returns the typed `HealthStatus` from the stored string.
+    pub fn health_status(&self) -> Result<HealthStatus, String> {
+        self.status.parse()
+    }
 }
 
 // Backup and disaster recovery types

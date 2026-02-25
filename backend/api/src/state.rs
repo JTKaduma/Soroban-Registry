@@ -1,4 +1,5 @@
 use crate::cache::{CacheConfig, CacheLayer};
+use crate::health_monitor::HealthMonitorStatus;
 use prometheus::Registry;
 use sqlx::PgPool;
 use std::sync::atomic::AtomicBool;
@@ -13,6 +14,7 @@ pub struct AppState {
     pub cache: Arc<CacheLayer>,
     pub registry: Registry,
     pub is_shutting_down: Arc<AtomicBool>,
+    pub health_monitor_status: HealthMonitorStatus,
 }
 
 impl AppState {
@@ -24,6 +26,7 @@ impl AppState {
             cache: Arc::new(CacheLayer::new(config)),
             registry,
             is_shutting_down,
+            health_monitor_status: HealthMonitorStatus::default(),
         }
     }
 }

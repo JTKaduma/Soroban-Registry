@@ -1,9 +1,12 @@
 use anyhow::Result;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use shared::{Contract, ContractHealth, ContractStats, HealthStatus};
 use sqlx::PgPool;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use tokio::sync::RwLock;
 use tokio::time;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use crate::state::AppState;
 
@@ -23,31 +26,103 @@ const SECURITY_TO_HEALTH_RATIO: f64 = 1.0 / SECURITY_SCORE_DIVISOR as f64;
 const MIN_SECURITY_SCORE: i32 = 0;
 const MAX_SECURITY_SCORE: i32 = (MAX_TOTAL_HEALTH_SCORE as f64 * SECURITY_TO_HEALTH_RATIO) as i32;
 
+/// Tracks the runtime status of the health monitor background task.
+#[derive(Clone)]
+pub struct HealthMonitorStatus {
+    pub last_run: Arc<RwLock<Option<DateTime<Utc>>>>,
+    pub last_success: Arc<RwLock<Option<DateTime<Utc>>>>,
+    pub last_error: Arc<RwLock<Option<String>>>,
+    pub total_runs: Arc<AtomicU64>,
+    pub total_failures: Arc<AtomicU64>,
+    pub contracts_checked: Arc<AtomicU64>,
+    pub contracts_failed: Arc<AtomicU64>,
+}
+
+impl Default for HealthMonitorStatus {
+    fn default() -> Self {
+        Self {
+            last_run: Arc::new(RwLock::new(None)),
+            last_success: Arc::new(RwLock::new(None)),
+            last_error: Arc::new(RwLock::new(None)),
+            total_runs: Arc::new(AtomicU64::new(0)),
+            total_failures: Arc::new(AtomicU64::new(0)),
+            contracts_checked: Arc::new(AtomicU64::new(0)),
+            contracts_failed: Arc::new(AtomicU64::new(0)),
+        }
+    }
+}
+
+/// Serializable snapshot of the health monitor status for the API response.
+#[derive(Debug, serde::Serialize)]
+pub struct HealthMonitorStatusResponse {
+    pub running: bool,
+    pub last_run: Option<DateTime<Utc>>,
+    pub last_success: Option<DateTime<Utc>>,
+    pub last_error: Option<String>,
+    pub total_runs: u64,
+    pub total_failures: u64,
+    pub contracts_checked: u64,
+    pub contracts_failed: u64,
+}
+
+impl HealthMonitorStatus {
+    pub async fn snapshot(&self) -> HealthMonitorStatusResponse {
+        let last_run = *self.last_run.read().await;
+        let last_success = *self.last_success.read().await;
+        let last_error = self.last_error.read().await.clone();
+        HealthMonitorStatusResponse {
+            running: last_run.is_some(),
+            last_run,
+            last_success,
+            last_error,
+            total_runs: self.total_runs.load(Ordering::Relaxed),
+            total_failures: self.total_failures.load(Ordering::Relaxed),
+            contracts_checked: self.contracts_checked.load(Ordering::Relaxed),
+            contracts_failed: self.contracts_failed.load(Ordering::Relaxed),
+        }
+    }
+}
+
 /// Main loop for the health monitor background task
-pub async fn run_health_monitor(state: AppState) {
+pub async fn run_health_monitor(state: AppState, status: HealthMonitorStatus) {
     info!("Starting health monitor background task");
 
-    // Run every 24 hours in production, but for demo/dev we can run it more frequently or on startup
-    // For now, we'll run it on startup and then every hour
+    // Run every hour
     let mut interval = time::interval(time::Duration::from_secs(3600));
 
     loop {
         interval.tick().await;
         info!("Running health checks...");
 
-        if let Err(e) = perform_health_checks(&state.db).await {
-            error!("Error performing health checks: {}", e);
+        status.total_runs.fetch_add(1, Ordering::Relaxed);
+        *status.last_run.write().await = Some(Utc::now());
+
+        match perform_health_checks(&state.db, &status).await {
+            Ok(()) => {
+                *status.last_success.write().await = Some(Utc::now());
+                *status.last_error.write().await = None;
+                info!("Health checks completed successfully");
+            }
+            Err(e) => {
+                let err_msg = format!("{}", e);
+                error!("Error performing health checks: {}", err_msg);
+                status.total_failures.fetch_add(1, Ordering::Relaxed);
+                *status.last_error.write().await = Some(err_msg);
+            }
         }
     }
 }
 
-async fn perform_health_checks(pool: &PgPool) -> Result<()> {
+async fn perform_health_checks(pool: &PgPool, status: &HealthMonitorStatus) -> Result<()> {
     // 1. Fetch all contracts
     let contracts: Vec<Contract> = sqlx::query_as("SELECT * FROM contracts")
         .fetch_all(pool)
         .await?;
 
     info!("Found {} contracts to check", contracts.len());
+
+    let mut checked: u64 = 0;
+    let mut failed: u64 = 0;
 
     for contract in contracts {
         // 2. Fetch stats (last activity)
@@ -57,12 +132,7 @@ async fn perform_health_checks(pool: &PgPool) -> Result<()> {
                 .fetch_optional(pool)
                 .await?;
 
-        // 3. Fetch verification status (if not in contract struct, though it is)
-        // contract.is_verified is available
-
-        // 4. Calculate health score
-        // For now, map the existing boolean to the new graduated enum base cases.
-        // In a subsequent update, we could map this from a complex DB join or audit state.
+        // 3. Calculate verification level
         let verification_level = if contract.is_verified {
             VerificationLevel::Verified
         } else {
@@ -71,11 +141,43 @@ async fn perform_health_checks(pool: &PgPool) -> Result<()> {
 
         let health = calculate_health(&contract, stats.as_ref(), verification_level);
 
-        // 5. Update database
-        upsert_contract_health(pool, &health).await?;
+        // 4. Update database — per-contract error handling so one failure doesn't stop the loop
+        match upsert_contract_health(pool, &health).await {
+            Ok(()) => {
+                checked += 1;
+            }
+            Err(e) => {
+                failed += 1;
+                error!(
+                    contract_id = %contract.id,
+                    error = %e,
+                    "Failed to upsert health for contract"
+                );
+            }
+        }
     }
 
-    info!("Health checks completed");
+    status
+        .contracts_checked
+        .fetch_add(checked, Ordering::Relaxed);
+    status
+        .contracts_failed
+        .fetch_add(failed, Ordering::Relaxed);
+
+    info!(
+        checked = checked,
+        failed = failed,
+        "Health checks completed"
+    );
+
+    if failed > 0 {
+        warn!(
+            "{} contract health upserts failed out of {}",
+            failed,
+            checked + failed
+        );
+    }
+
     Ok(())
 }
 
@@ -155,9 +257,6 @@ fn calculate_health(
         score -= 20;
     }
 
-    // Placeholder for audit check (not implemented yet)
-    // score -= 10;
-
     // Ensure score is within 0-100
     score = score.clamp(MIN_TOTAL_HEALTH_SCORE, MAX_TOTAL_HEALTH_SCORE);
 
@@ -207,7 +306,7 @@ fn calculate_health(
 
     ContractHealth {
         contract_id: contract.id,
-        status,
+        status: status.to_string(),
         last_activity,
         security_score: derive_security_score(score),
         audit_date: None,
@@ -234,17 +333,26 @@ async fn upsert_contract_health(pool: &PgPool, health: &ContractHealth) -> Resul
         "#,
     )
     .bind(health.contract_id)
-    .bind(&health.status)
+    .bind(&health.status)          // now a String — compatible with TEXT column
     .bind(health.last_activity)
     .bind(health.security_score)
     .bind(health.audit_date)
     .bind(health.total_score)
-    .bind(&health.recommendations)
+    .bind(&health.recommendations) // Vec<String> — compatible with TEXT[] column
     .bind(health.updated_at)
     .execute(pool)
     .await?;
 
     Ok(())
+}
+
+/// Handler: GET /api/health-monitor/status
+///
+/// Returns the current status of the health monitor background task.
+pub async fn get_health_monitor_status(
+    axum::extract::State(state): axum::extract::State<crate::state::AppState>,
+) -> axum::Json<HealthMonitorStatusResponse> {
+    axum::Json(state.health_monitor_status.snapshot().await)
 }
 
 #[cfg(test)]
@@ -355,5 +463,140 @@ mod tests {
         let health = calculate_health(&contract, Some(&stats), VerificationLevel::Audited);
         assert_eq!(health.total_score, 100);
         assert_eq!(health.security_score, 50);
+    }
+
+    // ─── Additional tests for the health scoring pipeline ───────────────
+
+    #[test]
+    fn test_health_status_display() {
+        assert_eq!(HealthStatus::Healthy.to_string(), "healthy");
+        assert_eq!(HealthStatus::Warning.to_string(), "warning");
+        assert_eq!(HealthStatus::Critical.to_string(), "critical");
+    }
+
+    #[test]
+    fn test_health_status_from_str() {
+        assert_eq!("healthy".parse::<HealthStatus>().unwrap(), HealthStatus::Healthy);
+        assert_eq!("warning".parse::<HealthStatus>().unwrap(), HealthStatus::Warning);
+        assert_eq!("critical".parse::<HealthStatus>().unwrap(), HealthStatus::Critical);
+        assert!("unknown".parse::<HealthStatus>().is_err());
+    }
+
+    #[test]
+    fn test_contract_health_status_field_is_string() {
+        let contract = build_dummy_contract();
+        let health = calculate_health(&contract, None, VerificationLevel::Verified);
+        // status should be a valid health status string
+        assert_eq!(health.status, "healthy");
+        assert_eq!(health.health_status().unwrap(), HealthStatus::Healthy);
+    }
+
+    #[test]
+    fn test_health_status_critical_with_unverified_and_inactivity() {
+        let mut contract = build_dummy_contract();
+        contract.is_verified = false;
+        let stats = ContractStats {
+            contract_id: contract.id,
+            total_deployments: 0,
+            total_interactions: 0,
+            unique_users: 0,
+            last_interaction: Some(Utc::now() - chrono::Duration::days(100)), // > 90 days
+        };
+        // Base 100 - 40 (Unverified) - 20 (>30d) - 20 (>90d) = 20 => Critical
+        let health = calculate_health(&contract, Some(&stats), VerificationLevel::Unverified);
+        assert_eq!(health.total_score, 20);
+        assert_eq!(health.status, "critical");
+        assert!(health.recommendations.iter().any(|r| r.contains("90 days")));
+        assert!(health
+            .recommendations
+            .iter()
+            .any(|r| r.contains("Verify")));
+    }
+
+    #[test]
+    fn test_health_recommendations_not_empty() {
+        let contract = build_dummy_contract();
+        // Even for the best case, recommendations should not be empty
+        let health = calculate_health(&contract, None, VerificationLevel::Audited);
+        assert!(
+            !health.recommendations.is_empty(),
+            "Recommendations should never be empty"
+        );
+        assert!(health
+            .recommendations
+            .contains(&"Contract is healthy and active. Keep it up!".to_string()));
+    }
+
+    #[test]
+    fn test_verification_level_score_weights() {
+        assert_eq!(VerificationLevel::Unverified.score_weight(), -40);
+        assert_eq!(VerificationLevel::Pending.score_weight(), -20);
+        assert_eq!(VerificationLevel::Verified.score_weight(), 0);
+        assert_eq!(VerificationLevel::Audited.score_weight(), 20);
+    }
+
+    #[test]
+    fn test_derive_security_score_midpoint() {
+        // score 50 -> security 25
+        assert_eq!(derive_security_score(50), 25);
+    }
+
+    #[test]
+    fn test_derive_security_score_negative_input() {
+        assert_eq!(derive_security_score(-10), 0);
+    }
+
+    #[test]
+    fn test_derive_security_score_above_max() {
+        assert_eq!(derive_security_score(200), MAX_SECURITY_SCORE);
+    }
+
+    #[test]
+    fn test_health_warning_status_range() {
+        let mut contract = build_dummy_contract();
+        contract.is_verified = false;
+        // Unverified: -40. Base 100 -> 60 => Warning (50..79)
+        let health = calculate_health(&contract, None, VerificationLevel::Unverified);
+        assert_eq!(health.status, "warning");
+    }
+
+    #[tokio::test]
+    async fn test_health_monitor_status_default() {
+        let status = HealthMonitorStatus::default();
+        let snapshot = status.snapshot().await;
+        assert!(!snapshot.running);
+        assert!(snapshot.last_run.is_none());
+        assert!(snapshot.last_success.is_none());
+        assert!(snapshot.last_error.is_none());
+        assert_eq!(snapshot.total_runs, 0);
+        assert_eq!(snapshot.total_failures, 0);
+        assert_eq!(snapshot.contracts_checked, 0);
+        assert_eq!(snapshot.contracts_failed, 0);
+    }
+
+    #[tokio::test]
+    async fn test_health_monitor_status_tracks_runs() {
+        let status = HealthMonitorStatus::default();
+        status.total_runs.fetch_add(1, Ordering::Relaxed);
+        *status.last_run.write().await = Some(Utc::now());
+        *status.last_success.write().await = Some(Utc::now());
+
+        let snapshot = status.snapshot().await;
+        assert!(snapshot.running);
+        assert!(snapshot.last_run.is_some());
+        assert!(snapshot.last_success.is_some());
+        assert_eq!(snapshot.total_runs, 1);
+    }
+
+    #[tokio::test]
+    async fn test_health_monitor_status_tracks_errors() {
+        let status = HealthMonitorStatus::default();
+        status.total_failures.fetch_add(1, Ordering::Relaxed);
+        *status.last_error.write().await = Some("test error".to_string());
+        *status.last_run.write().await = Some(Utc::now());
+
+        let snapshot = status.snapshot().await;
+        assert_eq!(snapshot.total_failures, 1);
+        assert_eq!(snapshot.last_error, Some("test error".to_string()));
     }
 }

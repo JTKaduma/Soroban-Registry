@@ -177,6 +177,13 @@ pub fn health_routes() -> Router<AppState> {
         )
 }
 
+pub fn health_monitor_routes() -> Router<AppState> {
+    Router::new().route(
+        "/api/health-monitor/status",
+        get(crate::health_monitor::get_health_monitor_status),
+    )
+}
+
 pub fn migration_routes() -> Router<AppState> {
     Router::new()
         .route(

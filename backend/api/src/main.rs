@@ -127,6 +127,13 @@ async fn main() -> Result<()> {
     // Spawn the background DB and cache monitoring task
     db_monitoring::spawn_db_monitoring_task(pool.clone(), state.cache.clone());
 
+    // Spawn the health monitor background task (Issue #333)
+    let hm_state = state.clone();
+    let hm_status = state.health_monitor_status.clone();
+    tokio::spawn(async move {
+        health_monitor::run_health_monitor(hm_state, hm_status).await;
+    });
+
     // Warm up the cache
     state.cache.clone().warm_up(pool.clone());
 
@@ -159,6 +166,7 @@ async fn main() -> Result<()> {
         .merge(routes::contract_routes())
         .merge(routes::publisher_routes())
         .merge(routes::health_routes())
+        .merge(routes::health_monitor_routes())
         .merge(routes::migration_routes())
         .merge(routes::compatibility_dashboard_routes())
         .merge(release_notes_routes::release_notes_routes())
