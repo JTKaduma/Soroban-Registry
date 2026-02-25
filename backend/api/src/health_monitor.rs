@@ -269,6 +269,7 @@ mod tests {
             tags: vec![],
             created_at: Utc::now(),
             updated_at: Utc::now(),
+            health_score: 0,
             is_maintenance: false,
             logical_id: None,
             network_configs: None,

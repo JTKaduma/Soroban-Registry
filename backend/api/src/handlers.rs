@@ -13,12 +13,12 @@ use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde_json::{json, Value};
 use shared::{
     pagination::Cursor, AnalyticsEventType, ChangePublisherRequest, Contract,
-    ContractAnalyticsResponse, ContractGetResponse, ContractInteractionResponse,
-    ContractSearchParams, ContractVersion, CreateContractVersionRequest,
-    CreateInteractionBatchRequest, CreateInteractionRequest, DeploymentStats,
-    InteractionTimeSeriesPoint, InteractionTimeSeriesResponse, InteractionsListResponse,
-    InteractionsQueryParams, InteractorStats, Network, NetworkConfig, PaginatedResponse,
-    PublishRequest, Publisher, SemVer, TimelineEntry, TopUser, TrendingParams,
+    ContractAnalyticsResponse, ContractChangelogEntry, ContractChangelogResponse,
+    ContractGetResponse, ContractInteractionResponse, ContractSearchParams, ContractVersion,
+    CreateContractVersionRequest, CreateInteractionBatchRequest, CreateInteractionRequest,
+    DeploymentStats, InteractionTimeSeriesPoint, InteractionTimeSeriesResponse,
+    InteractionsListResponse, InteractionsQueryParams, InteractorStats, Network, NetworkConfig,
+    PaginatedResponse, PublishRequest, Publisher, SemVer, TimelineEntry, TopUser, TrendingParams,
     UpdateContractMetadataRequest, UpdateContractStatusRequest, VerifyRequest,
 };
 use std::time::Duration;
@@ -913,6 +913,48 @@ async fn fetch_contract_identity(state: &AppState, id: &str) -> ApiResult<(Uuid,
     })
 }
 
+async fn ensure_contract_exists(
+    state: &AppState,
+    contract_uuid: Uuid,
+    contract_id_raw: &str,
+    operation: &str,
+) -> ApiResult<()> {
+    let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM contracts WHERE id = $1)")
+        .bind(contract_uuid)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|err| db_internal_error(operation, err))?;
+
+    if exists {
+        Ok(())
+    } else {
+        Err(ApiError::not_found(
+            "ContractNotFound",
+            format!("No contract found with ID: {}", contract_id_raw),
+        ))
+    }
+}
+
+async fn fetch_contract_network(
+    state: &AppState,
+    contract_uuid: Uuid,
+    contract_id_raw: &str,
+    operation: &str,
+) -> ApiResult<Network> {
+    let network: Option<Network> = sqlx::query_scalar("SELECT network FROM contracts WHERE id = $1")
+        .bind(contract_uuid)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|err| db_internal_error(operation, err))?;
+
+    network.ok_or_else(|| {
+        ApiError::not_found(
+            "ContractNotFound",
+            format!("No contract found with ID: {}", contract_id_raw),
+        )
+    })
+}
+
 pub async fn publish_contract(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -1224,17 +1266,7 @@ pub async fn get_contract_analytics(
         )
     })?;
 
-    let _contract: Contract = sqlx::query_as("SELECT * FROM contracts WHERE id = $1")
-        .bind(contract_uuid)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|err| match err {
-            sqlx::Error::RowNotFound => ApiError::not_found(
-                "ContractNotFound",
-                format!("No contract found with ID: {}", id),
-            ),
-            _ => db_internal_error("get contract for analytics", err),
-        })?;
+    ensure_contract_exists(&state, contract_uuid, &id, "get contract for analytics").await?;
 
     let thirty_days_ago = chrono::Utc::now() - chrono::Duration::days(30);
 
@@ -2105,17 +2137,13 @@ pub async fn get_contract_audit_log(
     let limit = params.limit.clamp(1, 500);
     let offset = params.offset.max(0);
 
-    let contract: Contract = sqlx::query_as("SELECT * FROM contracts WHERE id = $1")
-        .bind(contract_uuid)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|err| match err {
-            sqlx::Error::RowNotFound => ApiError::not_found(
-                "ContractNotFound",
-                format!("No contract found with ID: {}", id),
-            ),
-            _ => db_internal_error("check contract before audit log query", err),
-        })?;
+    ensure_contract_exists(
+        &state,
+        contract_uuid,
+        &id,
+        "check contract before audit log query",
+    )
+    .await?;
 
     let logs: Vec<ContractAuditLogEntry> = sqlx::query_as(
         r#"
@@ -2194,17 +2222,7 @@ pub async fn get_contract_interactions(
         )
     })?;
 
-    let contract: Contract = sqlx::query_as("SELECT * FROM contracts WHERE id = $1")
-        .bind(contract_uuid)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|err| match err {
-            sqlx::Error::RowNotFound => ApiError::not_found(
-                "ContractNotFound",
-                format!("No contract found with ID: {}", id),
-            ),
-            _ => db_internal_error("get contract for interactions", err),
-        })?;
+    ensure_contract_exists(&state, contract_uuid, &id, "get contract for interactions").await?;
 
     if let Some(days) = params.days {
         let days = days.clamp(1, 365);
@@ -2257,7 +2275,7 @@ pub async fn get_contract_interactions(
         .map_err(|err| db_internal_error("fetch weekly interaction trend", err))?;
 
         let response = InteractionTimeSeriesResponse {
-            contract_id: contract.id,
+            contract_id: contract_uuid,
             days,
             interactions_this_week,
             interactions_last_week,
@@ -2381,14 +2399,14 @@ pub async fn get_contract_interactions(
         None
     };
 
-    Ok(Json(InteractionsListResponse {
+    Ok(Json(json!(InteractionsListResponse {
         items,
         total,
         limit,
         offset,
         next_cursor,
         prev_cursor,
-    }))
+    })))
 }
 
 /// POST /api/contracts/:id/interactions — ingest one interaction.
@@ -2404,22 +2422,13 @@ pub async fn post_contract_interaction(
         )
     })?;
 
-    let contract: Contract = sqlx::query_as("SELECT * FROM contracts WHERE id = $1")
-        .bind(contract_uuid)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|err| match err {
-            sqlx::Error::RowNotFound => ApiError::not_found(
-                "ContractNotFound",
-                format!("No contract found with ID: {}", id),
-            ),
-            _ => db_internal_error("get contract for interaction", err),
-        })?;
+    let contract_network =
+        fetch_contract_network(&state, contract_uuid, &id, "get contract for interaction").await?;
 
     let interaction_type =
         parse_interaction_type(req.interaction_type.as_deref(), req.method.as_deref())?;
     let created_at = req.timestamp.unwrap_or_else(chrono::Utc::now);
-    let network = req.network.unwrap_or_else(|| contract.network.clone());
+    let network = req.network.unwrap_or(contract_network);
     let interaction_id = record_contract_interaction(
         &state.db,
         contract_uuid,
@@ -2460,24 +2469,20 @@ pub async fn post_contract_interactions_batch(
         )
     })?;
 
-    let contract: Contract = sqlx::query_as("SELECT * FROM contracts WHERE id = $1")
-        .bind(contract_uuid)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|err| match err {
-            sqlx::Error::RowNotFound => ApiError::not_found(
-                "ContractNotFound",
-                format!("No contract found with ID: {}", id),
-            ),
-            _ => db_internal_error("get contract for interactions batch", err),
-        })?;
+    let contract_network = fetch_contract_network(
+        &state,
+        contract_uuid,
+        &id,
+        "get contract for interactions batch",
+    )
+    .await?;
 
     let mut ids = Vec::with_capacity(req.interactions.len());
     for i in &req.interactions {
         let interaction_type =
             parse_interaction_type(i.interaction_type.as_deref(), i.method.as_deref())?;
         let created_at = i.timestamp.unwrap_or_else(chrono::Utc::now);
-        let network = i.network.clone().unwrap_or_else(|| contract.network.clone());
+        let network = i.network.clone().unwrap_or_else(|| contract_network.clone());
         let interaction_id = record_contract_interaction(
             &state.db,
             contract_uuid,
