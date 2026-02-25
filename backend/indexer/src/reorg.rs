@@ -129,6 +129,7 @@ mod tests {
         let mut state = IndexerState {
             network: shared::Network::Testnet,
             last_indexed_ledger_height: 500,
+            last_indexed_ledger_hash: None,
             last_checkpoint_ledger_height: 400,
             consecutive_failures: 2,
         };
