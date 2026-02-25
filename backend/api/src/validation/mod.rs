@@ -61,6 +61,16 @@ pub mod extractors;
 pub mod requests;
 pub mod sanitizers;
 pub mod validators;
+pub mod url_validation;
+pub mod payload_size;
+pub mod validation_rate_limit;
+pub mod enhanced_extractors;
+
+#[cfg(test)]
+mod comprehensive_tests;
+
+#[cfg(test)]
+mod integration_guide;
 
 // Re-export commonly used items
 pub use extractors::{FieldError, Validatable, ValidatedJson, ValidationBuilder, ValidationError};
@@ -75,4 +85,8 @@ pub use validators::{
     validate_semver, validate_source_code_size, validate_stellar_address,
     validate_stellar_address_optional, validate_tags, validate_url, validate_url_optional,
     validate_wasm_hash,
+};
+pub use url_validation::{
+    validate_url_https_only_with_whitelist, validate_https_url_only, parse_url_components,
+    get_domain_whitelist, UrlComponents,
 };

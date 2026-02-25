@@ -30,6 +30,7 @@ pub mod signing_handlers;
 mod state;
 mod type_safety;
 mod validation;
+pub mod security_log;
 // mod auth;
 // mod auth_handlers;
 // mod resource_handlers;
@@ -164,6 +165,8 @@ async fn main() -> Result<()> {
         .nest("/api", activity_feed_routes::routes())
         .fallback(handlers::route_not_found)
         .layer(middleware::from_fn(request_tracing::tracing_middleware))
+        .layer(middleware::from_fn(validation::payload_size::payload_size_validation_middleware))
+        .layer(middleware::from_fn(validation::enhanced_extractors::validation_failure_tracking_middleware))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             track_in_flight_middleware,

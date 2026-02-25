@@ -102,7 +102,8 @@ pub trait Validatable: Sized {
 /// 1. Parse JSON from the request body
 /// 2. Sanitize all string fields (trim, strip HTML, normalize)
 /// 3. Validate fields against defined rules
-/// 4. Return detailed 400 errors for validation failures
+/// 4. Log validation failures for security monitoring
+/// 5. Return detailed 400 errors for validation failures
 ///
 /// # Example
 ///
@@ -127,6 +128,27 @@ where
     type Rejection = ValidationError;
 
     async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
+        // Extract client IP and correlation ID for logging
+        let client_ip = req
+            .extensions()
+            .get::<std::net::SocketAddr>()
+            .map(|addr| addr.ip())
+            .unwrap_or_else(|| std::net::IpAddr::from([127, 0, 0, 1]));
+
+        let correlation_id = req
+            .headers()
+            .get("x-correlation-id")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_else(|| "unknown")
+            .to_string();
+
+        let path = req
+            .extensions()
+            .get::<axum::extract::MatchedPath>()
+            .map(|p| p.as_str())
+            .unwrap_or("unknown")
+            .to_string();
+
         // Step 1: Parse JSON
         let Json(mut data) = Json::<T>::from_request(req, state).await.map_err(|err| {
             // Convert JSON parsing errors to validation errors
@@ -145,6 +167,18 @@ where
                 }
                 _ => "Invalid JSON payload".to_string(),
             };
+
+            // Log JSON parsing error
+            crate::security_log::log_validation_failure(
+                client_ip,
+                "body",
+                &message,
+                &path,
+                "POST",
+                &correlation_id,
+                1,
+            );
+
             ValidationError::single("body", message)
         })?;
 
@@ -152,7 +186,21 @@ where
         data.sanitize();
 
         // Step 3: Validate the data
-        data.validate().map_err(ValidationError::new)?;
+        data.validate().map_err(|errors| {
+            // Log validation failures with field details
+            for error in &errors {
+                crate::security_log::log_validation_failure(
+                    client_ip,
+                    &error.field,
+                    &error.message,
+                    &path,
+                    "POST",
+                    &correlation_id,
+                    1,
+                );
+            }
+            ValidationError::new(errors)
+        })?;
 
         Ok(ValidatedJson(data))
     }
